@@ -69,4 +69,12 @@ void invoke_sync(void* component) noexcept;
  */
 void apply_pending(void* component) noexcept;
 
+/**
+ * Applies one fly/noclip movement after the normal physics sync, so collision response cannot
+ * overwrite it.
+ * @param component Physics component just synced.
+ * @return True when a fly movement was published this tick.
+ */
+[[nodiscard]] bool apply_fly_post_sync(void* component) noexcept;
+
 } // namespace sunrise::client::hooks::teleport

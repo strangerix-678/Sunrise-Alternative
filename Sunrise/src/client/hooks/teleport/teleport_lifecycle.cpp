@@ -90,7 +90,15 @@ std::int64_t __fastcall camera_transform(std::uint32_t playerIndex) noexcept {
 std::int64_t __fastcall physics_sync(std::byte* component, std::byte* outFlags) noexcept {
     apply_pending(component);
     const PhysicsSync next = original<PhysicsSync>(kPhysicsSlot);
-    return next != nullptr ? next(component, outFlags) : 0;
+    const std::int64_t result = next != nullptr ? next(component, outFlags) : 0;
+    // Fly/noclip is applied after the game's normal collision/sync pass, then published again.
+    // This makes the position override win over wall collision resolution without touching the
+    // body's collision flags or guessing at an undocumented Havok field.
+    if (next != nullptr && apply_fly_post_sync(component)) {
+        std::array<std::byte, 256> flyFlags{};
+        (void)next(component, flyFlags.data());
+    }
+    return result;
 }
 
 /**

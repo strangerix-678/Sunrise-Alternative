@@ -37,7 +37,8 @@ bool g_pathResolved{};
 /** @param settings Candidate configuration. @return True when every field is in range. */
 [[nodiscard]] bool valid(const Settings& settings) noexcept {
     return settings.distance >= kMinimumDistance && settings.distance <= kMaximumDistance
-           && settings.virtualKey <= kMaximumVirtualKey;
+           && settings.flySpeed >= kMinimumFlySpeed && settings.flySpeed <= kMaximumFlySpeed
+           && settings.virtualKey <= kMaximumVirtualKey && settings.flyKey <= kMaximumVirtualKey;
 }
 
 /** @param reason Key naming the step that failed. */
@@ -111,12 +112,21 @@ void parse(std::string_view text, Settings& output) noexcept {
     if (scalar_for(text, "\"enabled\"", scalar)) {
         output.enabled = scalar.starts_with("true");
     }
+    if (scalar_for(text, "\"fly_enabled\"", scalar)) {
+        output.flyEnabled = scalar.starts_with("true");
+    }
     std::array<char, kScalarCapacity> buffer{};
     if (scalar_for(text, "\"distance\"", scalar) && terminated(scalar, buffer)) {
         output.distance = std::strtof(buffer.data(), nullptr);
     }
+    if (scalar_for(text, "\"fly_speed\"", scalar) && terminated(scalar, buffer)) {
+        output.flySpeed = std::strtof(buffer.data(), nullptr);
+    }
     if (scalar_for(text, "\"virtual_key\"", scalar) && terminated(scalar, buffer)) {
         output.virtualKey = static_cast<std::uint32_t>(std::strtoul(buffer.data(), nullptr, 0));
+    }
+    if (scalar_for(text, "\"fly_key\"", scalar) && terminated(scalar, buffer)) {
+        output.flyKey = static_cast<std::uint32_t>(std::strtoul(buffer.data(), nullptr, 0));
     }
 }
 
@@ -134,10 +144,16 @@ void parse(std::string_view text, Settings& output) noexcept {
     const int size = std::snprintf(document.data(),
                                    document.size(),
                                    "{\n  \"enabled\": %s,\n  \"distance\": %.3f,\n"
-                                   "  \"virtual_key\": %u\n}\n",
+                                   "  \"fly_enabled\": %s,\n"
+                                   "  \"fly_speed\": %.3f,\n"
+                                   "  \"virtual_key\": %u,\n"
+                                   "  \"fly_key\": %u\n}\n",
                                    settings.enabled ? "true" : "false",
                                    static_cast<double>(settings.distance),
-                                   static_cast<unsigned>(settings.virtualKey));
+                                   settings.flyEnabled ? "true" : "false",
+                                   static_cast<double>(settings.flySpeed),
+                                   static_cast<unsigned>(settings.virtualKey),
+                                   static_cast<unsigned>(settings.flyKey));
     if (size <= 0) {
         return false;
     }

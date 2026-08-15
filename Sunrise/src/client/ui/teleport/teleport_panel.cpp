@@ -26,6 +26,7 @@ constexpr int kLastMouseKey = 6;
 constexpr std::size_t kKeyNameCapacity = 64;
 
 bool g_capturing{};
+bool g_flyCapturing{};
 
 /**
  * Names one virtual key for display.
@@ -87,6 +88,12 @@ void draw() noexcept {
     client::teleport::Settings settings = client::teleport::get();
     bool changed = false;
 
+    // Shared label column, wide enough for the longest label ("Fly Speed").
+    const float labelWidth =
+        ImGui::CalcTextSize("Fly Speed").x + ImGui::GetStyle().ItemSpacing.x * 2;
+    const float controlWidth = ImGui::GetContentRegionAvail().x - labelWidth;
+
+    // ---- Teleport ----
     ImGui::TextUnformatted("Teleport");
     ImGui::Separator();
     ImGui::TextWrapped("Teleports you forward in the facing direction. "
@@ -96,11 +103,6 @@ void draw() noexcept {
     changed = core::ui::components::toggle::control("Enabled", settings.enabled) || changed;
 
     ImGui::Spacing();
-    // One label column and one control column, so the slider and the key button share both edges.
-    const float labelWidth =
-        ImGui::CalcTextSize("Distance").x + ImGui::GetStyle().ItemSpacing.x * 2;
-    const float controlWidth = ImGui::GetContentRegionAvail().x - labelWidth;
-
     ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted("Distance");
     ImGui::SameLine(labelWidth);
@@ -117,7 +119,7 @@ void draw() noexcept {
 
     ImGui::Spacing();
     ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted("Key");
+    ImGui::TextUnformatted("TP Key");
     ImGui::SameLine(labelWidth);
     if (g_capturing) {
         if (ImGui::Button("...", ImVec2(controlWidth, 0.0F))) {
@@ -136,6 +138,56 @@ void draw() noexcept {
             g_capturing = true;
         }
     }
+
+    // ---- Flying ----
+    ImGui::Spacing();
+    ImGui::Spacing();
+    ImGui::PushID("flying");
+    ImGui::TextUnformatted("Flying");
+    ImGui::Separator();
+    ImGui::TextWrapped("Free-fly with collision disabled. W/A/S/D to move along the facing "
+                       "direction. Spacebar to ascend, Ctrl to descend.");
+    ImGui::Spacing();
+
+    changed = core::ui::components::toggle::control("Enabled", settings.flyEnabled) || changed;
+
+    ImGui::Spacing();
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted("Fly Speed");
+    ImGui::SameLine(labelWidth);
+    ImGui::SetNextItemWidth(controlWidth);
+    float flySpeed = settings.flySpeed;
+    if (ImGui::SliderFloat("##fly_speed",
+                           &flySpeed,
+                           client::teleport::kMinimumFlySpeed,
+                           client::teleport::kMaximumFlySpeed,
+                           "%.2f units/tick")) {
+        settings.flySpeed = flySpeed;
+        changed = true;
+    }
+
+    ImGui::Spacing();
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted("Fly Key");
+    ImGui::SameLine(labelWidth);
+    if (g_flyCapturing) {
+        if (ImGui::Button("...", ImVec2(controlWidth, 0.0F))) {
+            g_flyCapturing = false;
+        }
+        std::uint32_t picked = client::teleport::kNoKey;
+        if (capture_key(picked)) {
+            settings.flyKey = picked;
+            g_flyCapturing = false;
+            changed = true;
+        }
+    } else {
+        std::array<char, kKeyNameCapacity> name{};
+        key_name(settings.flyKey, name);
+        if (ImGui::Button(name.data(), ImVec2(controlWidth, 0.0F))) {
+            g_flyCapturing = true;
+        }
+    }
+    ImGui::PopID();
 
     if (changed && !client::teleport::publish(settings)) {
         ImGui::Spacing();

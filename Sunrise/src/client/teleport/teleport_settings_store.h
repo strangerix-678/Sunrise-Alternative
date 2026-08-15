@@ -6,10 +6,14 @@ namespace sunrise::client::teleport {
 
 /** Default distance, in world units along the camera's forward vector. */
 inline constexpr float kDefaultDistance = 10.0F;
+/** Default fly/noclip speed, in world units per physics tick. */
+inline constexpr float kDefaultFlySpeed = 0.75F;
+inline constexpr float kMinimumFlySpeed = 0.05F;
+inline constexpr float kMaximumFlySpeed = 10.0F;
 /** Smallest offered distance. Zero would leave the key bound to nothing visible. */
 inline constexpr float kMinimumDistance = 1.0F;
 /** Largest offered distance. Past this a press reliably lands through a wall or the floor. */
-inline constexpr float kMaximumDistance = 100.0F;
+inline constexpr float kMaximumDistance = 200.0F;
 /** No key is bound until one is picked, so a fresh install cannot teleport by accident. */
 inline constexpr std::uint32_t kNoKey = 0;
 
@@ -17,7 +21,10 @@ inline constexpr std::uint32_t kNoKey = 0;
 struct Settings {
     bool enabled{false};
     float distance{kDefaultDistance};
+    bool flyEnabled{false};
+    float flySpeed{kDefaultFlySpeed};
     std::uint32_t virtualKey{kNoKey};
+    std::uint32_t flyKey{kNoKey};
 };
 
 /**

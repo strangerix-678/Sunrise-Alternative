@@ -12,7 +12,7 @@ namespace {
 /** Namespaced stable ID prevents Client modules from colliding with Server modules. */
 constexpr std::string_view kTeleportStableId = "client.teleport";
 /** Short menu label for the teleport page. */
-constexpr std::string_view kTeleportDisplayName = "Teleport";
+constexpr std::string_view kTeleportDisplayName = "Teleport & Flying";
 
 core::ui::modules::registry::PageRegistration g_teleportPage;
 
