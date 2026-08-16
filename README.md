@@ -19,7 +19,7 @@ Spacebar: To ascend
 Ctrl: To descend
 Keys are saved between sessions.
 
-<img width="2000" height="924" alt="image" src="https://github.com/user-attachments/assets/25a77a1b-1ab4-447c-9b21-8c3c678560f4" />
+<img width="1809" height="1139" src="https://github.com/user-attachments/assets/2e05af38-e4e9-438f-bdd4-dbfe765474fb" />
 
 
 ## Merge Credits
