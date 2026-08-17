@@ -22,7 +22,7 @@ much faster than before.
 
 
 
-## Usage
+## How to Use
 
 Open the overlay with `Insert`, then go to the **Teleport \& Flying** tab.
 
