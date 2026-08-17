@@ -54,7 +54,7 @@ All keys and settings are saved between sessions.
 
 
 ## Preview
-Left is base, right is the alternative version
+Left is base, right is the alternative version.
 <img width="1920" height="1080" alt="alternate" src="https://github.com/user-attachments/assets/bbeec423-c2e2-4884-a5ad-d4bb11515bad" />
 
 
