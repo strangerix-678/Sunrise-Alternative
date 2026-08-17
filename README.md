@@ -2,9 +2,9 @@
 
 An alternative take on Project Sunrise, built on the 0.3.2 base. Same offline exploration
 mod, with the movement page reworked and a few settings widened. This is a fork with my own
-tweaks on top — all the real work is by the authors credited below.
+tweaks on top, all the real work is by the authors credited below.
 
-Offline only, same as the original — it does not connect to live servers.
+Offline only, same as the original. It does not connect to live servers.
 
 
 
@@ -13,12 +13,12 @@ Offline only, same as the original — it does not connect to live servers.
 * Movement page renamed **Teleport \& Flying**, reorganised into clear sections:
 **Teleport → Noclip → Flying**.
 * **Teleport** distance raised to **200** units. The key row is labelled **TP Key**.
-* **Noclip** is its own section with a simple on/off toggle (no key needed) — it sits between
+* **Noclip** is its own section with a simple on/off toggle (no key needed). It sits between
 Teleport and Flying so it's always visible.
 * **Flying** groups the fly controls with a clearer description. Fly speed range widened to
-**0.5 – 200 units/s** with finer (decimal) steps, so you can fly slower for precision or
+**0.5 – 200 units/s** with decimal steps, so you can fly slower for precision or
 much faster than before.
-* HUD page is listed as **Sunrise HUD** in the menu (its in-panel title stays "HUD").
+* HUD page is listed as **Sunrise HUD** in the menu.
 
 
 
