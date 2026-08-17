@@ -29,4 +29,18 @@ namespace sunrise::server::bap::encrypted::push::activity {
                                               std::size_t& written,
                                               bool burst) noexcept;
 
+/**
+ * Settles a staged roster body that reached the caller.
+ * A bubble is offered once, so its grant is recorded only where the frame is known published.
+ * @param session Connection-owned staged roster, cleared here.
+ */
+void commit_staged_roster(Session& session) noexcept;
+
+/**
+ * Puts back what a staged roster body advanced, now that the body has been discarded.
+ * The next push must offer the grant again and move the per-entry state byte again.
+ * @param session Connection-owned staged roster, cleared here.
+ */
+void discard_staged_roster(Session& session) noexcept;
+
 } // namespace sunrise::server::bap::encrypted::push::activity

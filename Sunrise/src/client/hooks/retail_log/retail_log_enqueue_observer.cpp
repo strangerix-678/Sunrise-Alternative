@@ -21,15 +21,17 @@ constexpr std::size_t kNativeTextSize = 320;
 constexpr std::int32_t kUnregisteredSite = -1;
 /** Line storage holds the cleaned text plus its fixed key prefix. */
 constexpr std::size_t kEventCapacity = kNativeTextSize + 64;
-/** A late config load can reset all category thresholds, so set them again now and then. */
-constexpr unsigned kReassertInterval = 512;
+/** A late config load resets the thresholds, so set them again on this period. A count will not
+ *  do: a closed category emits fewer lines, so it advances slower and stays closed. */
+constexpr std::uint64_t kReassertIntervalMs = 2'000;
 /** How many categories the game's own verbosity table holds. */
 constexpr std::uint32_t kCategoryCount = 26;
 /** 0 is the game's loosest category threshold. A higher value logs less. */
 constexpr std::uint32_t kMostVerbose = 0;
 
 thread_local bool g_inObserver{};
-volatile LONG g_sinceAssert{};
+/** Tick at which the next re-assert is due. Zero makes the first call assert. */
+volatile LONG64 g_nextAssertTick{};
 
 /**
  * Copies the native text into fixed storage as one printable line.
@@ -119,7 +121,15 @@ void assert_verbosity() noexcept {
     if (!core::log::accepts(core::log::Channel::client, core::log::Level::debug)) {
         return;
     }
-    if (InterlockedIncrement(&g_sinceAssert) % kReassertInterval != 1) {
+    const auto now = static_cast<LONG64>(GetTickCount64());
+    const LONG64 due = g_nextAssertTick;
+    if (now < due) {
+        return;
+    }
+    // One claim per period, so concurrent funnel threads do not all reopen the table.
+    if (InterlockedCompareExchange64(
+            &g_nextAssertTick, now + static_cast<LONG64>(kReassertIntervalMs), due)
+        != due) {
         return;
     }
     const auto setter = reinterpret_cast<SetCategoryVerbosity>(

@@ -12,6 +12,7 @@ bool Parser::client_settings(client::Settings& output) noexcept {
     bool hasExternalServer = false;
     bool hasFadeRelease = false;
     bool hasForceJoinRequestReady = false;
+    bool hasRegionPrivate = false;
     bool hasPinReplicatedRecord = false;
     bool hasHoldSpawn = false;
     bool hasSpawnHoldMs = false;
@@ -43,6 +44,11 @@ bool Parser::client_settings(client::Settings& output) noexcept {
                 return false;
             }
             hasForceJoinRequestReady = true;
+        } else if (key == "region_private") {
+            if (hasRegionPrivate || !boolean(candidate.regionPrivate)) {
+                return false;
+            }
+            hasRegionPrivate = true;
         } else if (key == "pin_replicated_record") {
             if (hasPinReplicatedRecord || !boolean(candidate.pinReplicatedRecord)) {
                 return false;

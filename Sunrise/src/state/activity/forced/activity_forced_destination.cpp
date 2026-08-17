@@ -87,6 +87,13 @@ void clear() noexcept {
     ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
 }
 
+/** @return True while the stored selection is complete and its switch is on. */
+bool override_active() noexcept {
+    ForcedDestination value{};
+    snapshot(value);
+    return active(value);
+}
+
 /** Overwrites one committed destination with the forced one. */
 bool apply(destination::DestinationSelection& selection) noexcept {
     ForcedDestination value{};

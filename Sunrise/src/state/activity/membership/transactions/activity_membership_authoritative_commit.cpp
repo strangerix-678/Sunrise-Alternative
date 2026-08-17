@@ -15,27 +15,26 @@ bool commit_authoritative(ActivityState& state,
     // revision advanced and the region never moved.
     MembershipState merged = merge(record.membership, prepared.authoritativeInput);
     const bool changed = !equal_authoritative(record.membership, merged);
+    const bool movesRegion = moves_region(record.membership, merged);
+    const bool publishes = changed || movesRegion;
     const bool revisionExhausted = state.stateRevision == activity::kMaximumRevision
                                    || (record.membership.hasIdentity
                                        && record.membership.revision == kMaximumMembershipRevision);
-    if (changed && revisionExhausted) {
+    if (publishes && revisionExhausted) {
         return false;
     }
-    const bool movesRegion = moves_region(record.membership, merged);
-    if (!changed && !movesRegion) {
+    if (!publishes) {
         return true;
     }
 
-    if (changed && record.membership.hasIdentity) {
+    // A region move advances the revision too. The citizen advertisement is rebuilt from the
+    // merged region, and the client applies one update per revision.
+    if (record.membership.hasIdentity) {
         ++merged.revision;
         merged.acknowledgedRevision = kAbsentRevision;
     }
-    // The merged region is stored either way. A region-only move publishes no new membership, so
-    // it must not bump the state revision the client checks its own table against.
     record.membership = merged;
-    if (changed) {
-        publish_change(state, record);
-    }
+    publish_change(state, record);
     return true;
 }
 

@@ -41,6 +41,33 @@ inline LeaseMask select_free(const LeaseMask& held, std::size_t requestedCount) 
     return selected;
 }
 
+/** @return Bits set in either lease mask. */
+inline LeaseMask unite(const LeaseMask& first, const LeaseMask& second) noexcept {
+    LeaseMask result{};
+    for (std::size_t index = 0; index < result.size(); ++index) {
+        result[index] = first[index] | second[index];
+    }
+    return result;
+}
+
+/**
+ * Reserves the highest logical slots.
+ * The client is granted low indices, so taking the high end keeps one contiguous split and
+ * leaves the client's ascending selection unchanged.
+ * @param count Slots to reserve, capped at the slot count.
+ * @return Mask with the highest count bits set.
+ */
+inline LeaseMask reserve_high(std::size_t count) noexcept {
+    LeaseMask reserved{};
+    const std::size_t wanted = (std::min)(count, kSlotCount);
+    for (std::size_t index = 0; index < wanted; ++index) {
+        const std::size_t slot = kSlotCount - 1 - index;
+        reserved[slot / kSlotsPerByte] |=
+            std::byte{static_cast<unsigned char>(1U << (slot % kSlotsPerByte))};
+    }
+    return reserved;
+}
+
 /** @return Bits set in both lease masks. */
 inline LeaseMask intersect(const LeaseMask& first, const LeaseMask& second) noexcept {
     LeaseMask result{};

@@ -18,24 +18,51 @@ constexpr std::uint8_t kSliceSetBitWidth = 10;
 /** Signed host-state fields add 1 before writing their unsigned value. */
 constexpr std::int32_t kSignedFieldBias = 1;
 
+/** Ambassadorship state fields are 2 bits at bias 1, so wire 2 stores the assigned state 1. */
+constexpr std::uint64_t kAmbassadorAssigned = 2;
+/** Member-slot fields are 6 bits at bias 1. */
+constexpr std::uint8_t kSlotBitWidth = 6;
 /**
- * Writes one 451-bit state-zero region record.
+ * Ambassador slot named by a record with no advertisement, at bias 1, so wire 2 stores slot 1.
+ * It must never store the client's own slot 0. A record naming slot 0 makes the client claim the
+ * region, and the next differing slot then revokes it for good.
+ */
+constexpr std::uint64_t kUnadvertisedAmbassadorSlot = 2;
+/** The join-descriptor element count is an unclamped 8-bit field; only 128 is usable. */
+constexpr std::uint64_t kDescriptorCount = 128;
+
+/**
+ * Writes one state-zero region record.
+ * A record carrying the citizen advertisement is 1,024 bits longer than the others.
  * @param writer Fixed-buffer writer sitting at the record start.
  * @param bubble Bubble index, 0 through 63.
- * @param token Transition token copied into all member lanes.
+ * @param snapshot Transition token and optional citizen advertisement.
  * @return True when every fixed field fits.
  */
-[[nodiscard]] bool
-write_region(encoding::bits::Writer& writer, std::size_t bubble, std::uint8_t token) noexcept {
+[[nodiscard]] bool write_region(encoding::bits::Writer& writer,
+                                std::size_t bubble,
+                                const MembershipSnapshot& snapshot) noexcept {
     const std::uint32_t region = static_cast<std::uint32_t>(bubble) * kRegionIndexStride;
+    const bool advertise = snapshot.citizen.present
+                           && static_cast<std::int32_t>(region) == snapshot.citizen.regionIndex;
+    const std::uint64_t ambassadorSlot =
+        advertise ? static_cast<std::uint64_t>(snapshot.citizen.ambassadorSlot) + kSignedFieldBias
+                  : kUnadvertisedAmbassadorSlot;
     bool encoded = writer.write(kRegionIndexBias + region, 32) && writer.write(1, 2)
-                   && writer.write(0, 8) && writer.write(2, 2) && writer.write(1, 6)
-                   && writer.write(0, 1) && writer.write(0, 32) && writer.write(0, 8)
-                   && writer.write(0, 32);
+                   && writer.write(0, 8) && writer.write(kAmbassadorAssigned, 2)
+                   && writer.write(ambassadorSlot, kSlotBitWidth) && writer.write(0, 1)
+                   && writer.write(0, 32) && writer.write(0, 8) && writer.write(0, 32);
     for (std::size_t member = 0; encoded && member < kRegionTokenCount; ++member) {
-        encoded = writer.write(token, 8);
+        encoded = writer.write(snapshot.transitionToken, 8);
     }
-    return encoded && writer.write(0, 8) && writer.write(0, 64);
+    if (!advertise) {
+        return encoded && writer.write(0, 8) && writer.write(0, 64);
+    }
+    encoded = encoded && writer.write(kDescriptorCount, 8);
+    for (const std::byte value : snapshot.citizen.descriptor) {
+        encoded = encoded && writer.write(std::to_integer<std::uint64_t>(value), 8);
+    }
+    return encoded && writer.write(snapshot.citizen.onlineSessionId, 64);
 }
 
 /**
@@ -87,9 +114,10 @@ bool write_region_block(encoding::bits::Writer& writer,
                         const MembershipSnapshot& snapshot) noexcept {
     bool encoded = writer.bit_count() == kRegionBlockStartBit;
     for (std::size_t bubble = 0; encoded && bubble < kRegionCount; ++bubble) {
-        encoded = write_region(writer, bubble, snapshot.transitionToken);
+        encoded = write_region(writer, bubble, snapshot);
     }
-    return encoded && write_host_tail(writer, snapshot) && writer.bit_count() == kRegionBlockEndBit;
+    return encoded && write_host_tail(writer, snapshot)
+           && writer.bit_count() == region_block_end_bit(snapshot);
 }
 
 } // namespace sunrise::middleware::bap::activity_message::replicate_membership

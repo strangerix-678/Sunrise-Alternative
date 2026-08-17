@@ -130,6 +130,45 @@ next_state_sequence(Session& session, std::uint32_t folded, bool burst) noexcept
 
 } // namespace
 
+/** Resolves the one region a session publishes. */
+EffectiveRegion effective_region(std::uint64_t sessionId) noexcept {
+    state::activity::defaults::ActivityDefaults defaults{};
+    state::activity::destination::DestinationSelection selection{};
+    state::activity::defaults::snapshot(defaults);
+    // The session's own destination wins. The authored default covers a session that committed
+    // before any selection was readable.
+    if (!state::activity::destination::snapshot(sessionId, selection)) {
+        selection = defaults.defaultDestination.selection;
+    }
+    const std::string_view name(reinterpret_cast<const char*>(selection.packageName.data()),
+                                selection.packageNameLength);
+    // A missing layout leaves a cleared definition, and the arrival rule then returns the
+    // authored fallback index.
+    layouts::Definition layout{};
+    static_cast<void>(state::build_data::find_scenario_layout(name, layout));
+    EffectiveRegion region{};
+    region.arrival = arrival_slice_set(defaults.defaultDestination, selection, name, layout);
+    const std::int32_t reported = state::activity::membership::reported_region(sessionId);
+    region.reported = reported >= 0;
+    region.index = region.reported ? reported : static_cast<std::int32_t>(region.arrival);
+    return region;
+}
+
+/** Resolves the region one prepared membership body publishes. */
+EffectiveRegion planned_region(const state::activity::membership::PendingMutation& mutation,
+                               std::uint64_t sessionId) noexcept {
+    EffectiveRegion region = effective_region(sessionId);
+    // The same rule the State merge uses, so the body and the record it will commit agree. A
+    // negative index is the unset value the client sends on its way out, not a position.
+    if (mutation.authoritativeInput.hasRegion
+        && mutation.authoritativeInput.region.index
+               > state::activity::membership::kAbsentRegionIndex) {
+        region.index = mutation.authoritativeInput.region.index;
+        region.reported = true;
+    }
+    return region;
+}
+
 /** Builds the roster body input for one session's current destination. */
 RosterOutcome build_roster_snapshot(Session& session,
                                     Scratch& scratch,
@@ -142,6 +181,13 @@ RosterOutcome build_roster_snapshot(Session& session,
     state::activity::defaults::ActivityDefaults defaults{};
     state::activity::destination::DestinationSelection selection{};
     state::activity::defaults::snapshot(defaults);
+    // A joined link takes its region from the link that knows where the player is, so its bubble
+    // grant names the bubble the world is in. Its roster groups stay its own: the client-reference
+    // table holds one record per key, so two containers sharing a key orphan each other's rows.
+    const std::uint64_t regionFrom =
+        session.activityJoinedForeignSession
+            ? state::activity::membership::live_region_session(session.activitySessionId)
+            : session.activitySessionId;
     // The session's own destination wins. The authored default covers a session that committed
     // before any selection was readable.
     if (!state::activity::destination::snapshot(session.activitySessionId, selection)) {
@@ -161,8 +207,9 @@ RosterOutcome build_roster_snapshot(Session& session,
 
     const state::activity::defaults::FallbackPolicy& fallback =
         defaults.defaultDestination.fallback;
-    const std::uint16_t sliceSet =
-        arrival_slice_set(defaults.defaultDestination, selection, name, layout);
+    // One resolution serves this body and the citizen advertisement in message 12. Two would let
+    // the join descriptor land in a region record the client is not pending on.
+    const EffectiveRegion region = effective_region(regionFrom);
     snapshot.patchEpoch = session.activityPatchEpoch;
     // The character the join named wins, resolved to its authored SOID. The client binds its
     // player by matching this value against the object registry, and the short form the join
@@ -179,15 +226,11 @@ RosterOutcome build_roster_snapshot(Session& session,
     }
     snapshot.lifetime = kLifetimeState;
     snapshot.keyOnEveryParticipationSlot = defaults.rosterKeyOnAllSlots;
-    // The participation record's `+0` latches only when the region index is known. The client
-    // names the region it is actually in and that moves as the player walks between bubbles, so
-    // the destination's arrival slice set is only right until the first report arrives.
-    const std::int32_t reported =
-        state::activity::membership::reported_region(session.activitySessionId);
-    snapshot.region = reported >= 0 ? static_cast<std::uint32_t>(reported) : sliceSet;
+    // The participation record's `+0` latches only when the region index is known.
+    snapshot.region = static_cast<std::uint32_t>(region.index);
     snapshot.hasRegion = true;
     // The spawn override always names the destination's own arrival, never the player's position.
-    snapshot.spawnSliceSet = sliceSet;
+    snapshot.spawnSliceSet = region.arrival;
     snapshot.spawnSetHash =
         state::activity::destination::attachable_spawn_set_hash(selection, fallback.spawnSetHash);
     snapshot.hasSpawnOverride =

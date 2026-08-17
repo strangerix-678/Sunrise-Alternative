@@ -8,7 +8,6 @@
 
 #include <array>
 #include <atomic>
-#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -17,7 +16,8 @@
 #include "../../../core/ui/runtime/ui_visibility_runtime.h"
 #include "../../../state/account/account_state.h"
 #include "../../../state/runtime/runtime.h"
-#include "../../teleport/teleport_settings_store.h"
+#include "../../input/window_focus.h"
+#include "../../movement/movement_settings_store.h"
 #include "../polled_input/runtime.h"
 #include "internal.h"
 #include "runtime.h"
@@ -48,10 +48,6 @@ std::atomic_bool g_keyDown{false};
 std::atomic_uint32_t g_requestAge{0};
 /** Set while the feature is usable, so the per-tick path costs one atomic read when it is not. */
 std::atomic_bool g_active{false};
-
-/** F6 toggles the local fly/noclip movement override. */
-std::atomic_bool g_flyEnabled{false};
-std::atomic_bool g_flyKeyWasDown{false};
 
 /**
  * The player's physics component, kept from the last tick that carried it. At rest the sync stops
@@ -310,89 +306,6 @@ void set_vertical_velocity(std::byte* body, float value) noexcept {
 }
 
 /**
- * Polls the F6 toggle. The edge test prevents a held key from repeatedly flipping the mode.
- */
-void poll_fly_toggle() noexcept {
-    const client::teleport::Settings settings = client::teleport::get();
-    // Master switch off, or no key bound: fly is fully disabled and any active fly stops.
-    if (!settings.flyEnabled || settings.flyKey == client::teleport::kNoKey) {
-        g_flyEnabled.store(false, std::memory_order_relaxed);
-        g_flyKeyWasDown.store(false, std::memory_order_relaxed);
-        return;
-    }
-    // While the overlay owns the keyboard (e.g. binding the key) a press must not toggle fly.
-    if (core::ui::runtime::snapshot().visible) {
-        g_flyKeyWasDown.store(false, std::memory_order_relaxed);
-        return;
-    }
-    const bool down = (GetAsyncKeyState(static_cast<int>(settings.flyKey)) & 0x8000) != 0;
-    const bool wasDown = g_flyKeyWasDown.exchange(down, std::memory_order_acq_rel);
-    if (down && !wasDown) {
-        const bool enabled = !g_flyEnabled.load(std::memory_order_acquire);
-        g_flyEnabled.store(enabled, std::memory_order_release);
-        core::log::write(core::log::Channel::client,
-                         core::log::Level::info,
-                         enabled ? "ev=fly mode=enabled" : "ev=fly mode=disabled");
-    }
-}
-
-/**
- * Applies camera-relative six-axis movement while fly/noclip is enabled. Collision is bypassed by
- * publishing the rigid-body position directly and clearing vertical velocity, so gravity and the
- * ordinary collision response cannot pull the player back. W/S fly along the camera direction;
- * A/D strafe; Space/Ctrl move straight up and down.
- * @param component Physics component proved to own the player.
- * @return True when the position was written.
- */
-[[nodiscard]] bool apply_fly(std::byte* component) noexcept {
-    if (!g_flyEnabled.load(std::memory_order_acquire) || !owns_player(component)) {
-        return false;
-    }
-    std::byte* const body = body_of(component);
-    if (body == nullptr) {
-        return false;
-    }
-
-    const bool forward = (GetAsyncKeyState('W') & 0x8000) != 0;
-    const bool backward = (GetAsyncKeyState('S') & 0x8000) != 0;
-    const bool left = (GetAsyncKeyState('A') & 0x8000) != 0;
-    const bool right = (GetAsyncKeyState('D') & 0x8000) != 0;
-    const bool up = (GetAsyncKeyState(VK_SPACE) & 0x8000) != 0;
-    const bool down = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
-
-    std::array<float, kVectorLanes> delta{};
-    const float forwardAxis = static_cast<float>(forward) - static_cast<float>(backward);
-    const float strafeAxis = static_cast<float>(right) - static_cast<float>(left);
-    const float verticalAxis = static_cast<float>(up) - static_cast<float>(down);
-
-    // Camera-relative basis. Forward uses the full 3D camera direction, so looking up/down makes
-    // W/S fly along the cursor direction. Right is the horizontal cross product against world up.
-    const float fx = g_forward[0];
-    const float fy = g_forward[1];
-    const float fz = g_forward[2];
-    const float forwardLength = std::sqrt(fx * fx + fy * fy + fz * fz);
-    const float nx = forwardLength > 0.001F ? fx / forwardLength : 1.0F;
-    const float ny = forwardLength > 0.001F ? fy / forwardLength : 0.0F;
-    const float nz = forwardLength > 0.001F ? fz / forwardLength : 0.0F;
-    const float rightLength = std::sqrt(ny * ny + nx * nx);
-    const float rx = rightLength > 0.001F ? ny / rightLength : 0.0F;
-    const float ry = rightLength > 0.001F ? -nx / rightLength : 1.0F;
-    const float speed = client::teleport::get().flySpeed;
-
-    delta[0] = (nx * forwardAxis + rx * strafeAxis) * speed;
-    delta[1] = (ny * forwardAxis + ry * strafeAxis) * speed;
-    delta[kVerticalLane] = (nz * forwardAxis + verticalAxis) * speed;
-
-    std::array<float, kVectorLanes> position{};
-    std::array<float, kVectorLanes> moved{};
-    if (!offset_vector(body + kBodyPositionX, delta, position, moved)) {
-        return false;
-    }
-    set_vertical_velocity(body, 0.0F);
-    return true;
-}
-
-/**
  * Runs the whole move for a component already proved to be the player's.
  * @param component Physics component driving the player.
  * @return True when the body was found and its position was written.
@@ -405,7 +318,7 @@ void poll_fly_toggle() noexcept {
     }
     report_gates(component, body);
     set_vertical_velocity(body, 0.0F);
-    if (!move_body(body, client::teleport::get().distance)) {
+    if (!move_body(body, client::movement::get().distance)) {
         return false;
     }
     begin_press();
@@ -430,13 +343,10 @@ void clear_targets() noexcept {
     g_requestAge.store(0, std::memory_order_relaxed);
     g_active.store(false, std::memory_order_relaxed);
     g_playerComponent.store(nullptr, std::memory_order_relaxed);
-    g_flyEnabled.store(false, std::memory_order_relaxed);
-    g_flyKeyWasDown.store(false, std::memory_order_relaxed);
 }
 
 /** Publishes the camera forward vector for the physics tick that follows. */
 void capture_forward(std::uint32_t playerIndex) noexcept {
-    poll_fly_toggle();
     if (playerIndex == kInvalidHandle || g_cameraSingleton == nullptr) {
         return;
     }
@@ -456,8 +366,8 @@ void capture_forward(std::uint32_t playerIndex) noexcept {
 void poll_request() noexcept {
     end_press();
     expire_request();
-    const client::teleport::Settings settings = client::teleport::get();
-    const bool usable = settings.enabled && settings.virtualKey != client::teleport::kNoKey;
+    const client::movement::Settings settings = client::movement::get();
+    const bool usable = settings.enabled && settings.virtualKey != client::movement::kNoKey;
     g_active.store(usable, std::memory_order_relaxed);
     if (!usable) {
         g_keyDown.store(false, std::memory_order_relaxed);
@@ -468,7 +378,8 @@ void poll_request() noexcept {
         g_keyDown.store(false, std::memory_order_relaxed);
         return;
     }
-    const bool down = (GetAsyncKeyState(static_cast<int>(settings.virtualKey)) & 0x8000) != 0;
+    const bool down = client::input::game_focused()
+                      && (GetAsyncKeyState(static_cast<int>(settings.virtualKey)) & 0x8000) != 0;
     if (down && !g_keyDown.exchange(down, std::memory_order_relaxed)) {
         g_requestAge.store(0, std::memory_order_relaxed);
         g_requested.store(true, std::memory_order_release);
@@ -522,17 +433,60 @@ void force_pending() noexcept {
         core::log::Channel::client, core::log::Level::info, "ev=teleport stage=force result=ok");
 }
 
-/** Applies the fly movement after the game's normal sync. This is the noclip write point. */
-bool apply_fly_post_sync(void* component) noexcept {
-    if (!g_flyEnabled.load(std::memory_order_acquire) || component == nullptr) {
+/** Reports the physics component the local player was last seen driving. */
+void* local_player_component() noexcept {
+    return g_playerComponent.load(std::memory_order_relaxed);
+}
+
+/** @param component Candidate physics component. @return True when the local player drives it. */
+bool owns_local_player(void* component) noexcept {
+    return component != nullptr && g_controlledHandle != nullptr
+           && owns_player(static_cast<std::byte*>(component));
+}
+
+/** Reads the world position of the body a physics component drives. */
+bool read_position(void* component, Vector& position) noexcept {
+    if (component == nullptr) {
         return false;
     }
-    std::byte* const physics = static_cast<std::byte*>(component);
-    if (!owns_player(physics)) {
+    std::byte* const body = body_of(static_cast<std::byte*>(component));
+    return body != nullptr && read_at(body + kBodyPositionX, position);
+}
+
+/** Writes the world position of the body a physics component drives. */
+bool write_position(void* component, const Vector& position) noexcept {
+    if (component == nullptr) {
         return false;
     }
-    g_playerComponent.store(physics, std::memory_order_relaxed);
-    return apply_fly(physics);
+    std::byte* const body = body_of(static_cast<std::byte*>(component));
+    return body != nullptr && write_vector(body + kBodyPositionX, position);
+}
+
+/** Reads the linear velocity of the body a physics component drives. */
+bool read_velocity(void* component, Vector& velocity) noexcept {
+    if (component == nullptr) {
+        return false;
+    }
+    std::byte* const body = body_of(static_cast<std::byte*>(component));
+    return body != nullptr && read_at(body + kBodyVelocityX, velocity);
+}
+
+/** Writes the linear velocity of the body a physics component drives. */
+bool write_velocity(void* component, const Vector& velocity) noexcept {
+    if (component == nullptr) {
+        return false;
+    }
+    std::byte* const body = body_of(static_cast<std::byte*>(component));
+    return body != nullptr && write_vector(body + kBodyVelocityX, velocity);
+}
+
+/** Reports the camera forward vector published this frame. */
+bool camera_forward(Vector& forward) noexcept {
+    if (!g_forwardValid.load(std::memory_order_acquire)) {
+        return false;
+    }
+    forward = g_forward;
+    return true;
 }
 
 } // namespace sunrise::client::hooks::teleport

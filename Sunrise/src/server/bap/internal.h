@@ -8,6 +8,7 @@
 #include "../../client/network/consumer.h"
 #include "../../middleware/bap/activity_message/activity_patch_epoch_parser.h"
 #include "../../middleware/bap/frame.h"
+#include "../../state/activity/bubble_authority/definition.h"
 #include "../../state/build_data/scenarios/definition.h"
 #include "../../state/runtime/state.h"
 #include "encrypted/queuez/definition.h"
@@ -28,6 +29,22 @@ struct Scratch {
     std::array<state::build_data::scenarios::RosterGroup,
                state::build_data::scenarios::kDestinationGroupCapacity>
         rosterGroups{};
+};
+
+/**
+ * What one staged roster body owes State, and the counters to put back if it is discarded.
+ * A bubble is offered once, and the state byte rebuilds every object the roster owns. Both may
+ * move only once the frame reaches the caller.
+ */
+struct RosterPublication {
+    state::activity::bubble_authority::Grant grant{};
+    std::uint32_t priorGroups{};
+    std::uint8_t priorSends{};
+    std::uint8_t priorState{};
+    /** Set when the staged body carried a bubble grant that State has not recorded yet. */
+    bool hasGrant{};
+    /** Set while a roster body is staged and its outcome is undecided. */
+    bool staged{};
 };
 
 /** Mutable transport state owned by one BAP connection. */
@@ -68,11 +85,24 @@ struct Session {
     /** Set once message 52 has arrived, which is what makes a roster update sendable. */
     bool activityPatchEpochSeen{};
     /**
+     * Set when this link's first binding came from joining a session it did not allocate.
+     * Such a link carries the keepalive alone. A roster or membership push on it stalls the load.
+     */
+    bool activityJoinedForeignSession{};
+    /**
+     * Region the last delivered citizen advertisement named. -1 until one has gone out.
+     * It moves only on a frame that reached the client and carried a descriptor. Anything else
+     * leaves the region-change trigger armed for the next poll.
+     */
+    std::int32_t activityAdvertisedRegion{-1};
+    /**
      * Reason code of the last logged roster outcome.
      * The push runs every second, so a refusal is logged only when the reason changes. One flag
      * for every reason hides the second failure behind the first.
      */
     std::uint8_t activityRosterReason{};
+    /** What one staged roster body owes, and what to put back if it never reaches the caller. */
+    RosterPublication activityRosterStaged{};
     /** Queuez versions and residents published only through this authenticated peer. */
     encrypted::queuez::SessionState queuez{};
     /** Tick count after which the owed Family-4 re-push may go out. */
@@ -87,6 +117,14 @@ struct Session {
     std::uint64_t bannerRepushRoot{};
     /** True while one banner re-push is still owed to this peer. */
     bool bannerRepushArmed{};
+    /** Latest shared-account generation this peer has received. */
+    std::uint64_t accountGeneration{};
+    /** Newest shared-account generation owed as a full cross-peer refresh. */
+    std::uint64_t accountResyncGeneration{};
+    /** Set by encrypted processing only after one account mutation commits and is copied out. */
+    bool accountMutationPublished{};
+    /** True while another peer's account mutation still needs a full local refresh. */
+    bool accountResyncArmed{};
 };
 
 namespace plaintext {
@@ -95,6 +133,7 @@ namespace plaintext {
  * Handles plaintext bootstrap services, arms encryption after service 25, and routes the rest.
  * @param session Auth and nonce state owned by the connection.
  * @param scratch Transform buffers owned by the lock, kept off the Client thread stack.
+ * @param outer Parsed outer frame carrying the service id and its body.
  * @param response Whole-frame storage owned by the caller.
  * @param written Gets the encoded response size in bytes.
  * @return True when the service owes no reply, or its response is encoded.

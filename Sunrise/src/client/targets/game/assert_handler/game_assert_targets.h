@@ -8,9 +8,9 @@
 namespace sunrise::client::targets::game::assert_handler {
 
 /**
- * Derives the assert handler slot from the setter copies and the assert sites that read it.
+ * Derives the assert handler setter and slot from the setter copies and the reading sites.
  * @param image Executable ranges from the main game image.
- * @param output Receives the slot and the handler currently installed in it.
+ * @param output Receives the setter, slot and handler currently installed in it.
  * @return True when one candidate wins the vote by the required margin.
  */
 [[nodiscard]] bool derive(std::span<const patterns::ImageRange> image, Targets& output) noexcept;

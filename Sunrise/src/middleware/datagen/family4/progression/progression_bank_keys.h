@@ -8,7 +8,7 @@
 namespace sunrise::middleware::datagen::family4::progression {
 
 /**
- * Keys one object's progression bank from the installed progression definitions.
+ * Keys one object's progression bank and fills each keyed row from the authored lanes.
  * Slots start at the empty definition index: 0 is a real progression, and the record enumerator
  * skips a slot only when all bits are set. Keyed slots are this object's scope, in native order.
  * @param scope Replicated object owning the bank.

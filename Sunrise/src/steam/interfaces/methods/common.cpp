@@ -1,13 +1,12 @@
 #include <cstdint>
 #include <cstring>
 
+#include "../../../core/settings/settings.h"
 #include "../internal.h"
 
 namespace sunrise::steam::interfaces::methods {
 namespace {
 
-/** Steam language token used when there is no localization service. */
-constexpr char kLanguage[] = "english";
 /** Steam callback id for receiving the current user stats. */
 constexpr int kUserStatsReceivedCallback = 1101;
 /** Steam result code for success. */
@@ -61,9 +60,9 @@ bool return_true([[maybe_unused]] void* self) noexcept {
     return true;
 }
 
-/** @return Language token. It lasts for the whole process. */
+/** @return Language token from settings. It lasts for the whole process. */
 const char* language([[maybe_unused]] void* self) noexcept {
-    return kLanguage;
+    return core::settings::get().steam.language.data();
 }
 
 /** @return The stable local user handle. */

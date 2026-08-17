@@ -1,13 +1,17 @@
+#include <algorithm>
+#include <array>
+#include <cstdio>
 #include <string_view>
 
+#include "../../logging/log.h"
 #include "../parser.h"
 
 namespace sunrise::core::settings::parser {
 namespace {
 
-/** Space is the first printable ASCII value accepted by persona storage. */
+/** Space is the first printable ASCII value accepted by fixed string storage. */
 constexpr unsigned int kMinimumPrintableAscii = 0x20;
-/** Tilde is the last printable ASCII value accepted by persona storage. */
+/** Tilde is the last printable ASCII value accepted by fixed string storage. */
 constexpr unsigned int kMaximumPrintableAscii = 0x7E;
 /** Hex letter digits start at the value 10. */
 constexpr unsigned int kHexadecimalAlphaOffset = 10;
@@ -95,14 +99,16 @@ decode_escape(std::string_view encoded, std::size_t& position, char& output) noe
 }
 
 /**
- * Decodes a nonempty persona into process-owned fixed storage.
+ * Decodes a nonempty printable-ASCII JSON string into fixed storage.
+ * The storage reserves its last byte for the trailing null, so that byte bounds the decode.
  * @param encoded Borrowed encoded JSON string bytes.
  * @param output Receives the decoded bytes and a trailing null only on success.
- * @return True for 1 to 63 printable ASCII bytes.
+ * @return True for 1 to Capacity minus 1 printable ASCII bytes.
  */
-[[nodiscard]] bool decode_persona(std::string_view encoded,
-                                  std::array<char, steam::kPersonaNameCapacity>& output) noexcept {
-    std::array<char, steam::kPersonaNameCapacity> candidate{};
+template <std::size_t Capacity>
+[[nodiscard]] bool decode_bounded_string(std::string_view encoded,
+                                         std::array<char, Capacity>& output) noexcept {
+    std::array<char, Capacity> candidate{};
     std::size_t decodedCount = 0;
     for (std::size_t position = 0; position < encoded.size();) {
         char value = encoded[position++];
@@ -111,7 +117,7 @@ decode_escape(std::string_view encoded, std::size_t& position, char& output) noe
         }
         const auto byte = static_cast<unsigned char>(value);
         if (byte < kMinimumPrintableAscii || byte > kMaximumPrintableAscii
-            || decodedCount >= steam::kMaximumPersonaNameBytes) {
+            || decodedCount + 1 >= Capacity) {
             return false;
         }
         candidate[decodedCount++] = value;
@@ -123,6 +129,68 @@ decode_escape(std::string_view encoded, std::size_t& position, char& output) noe
     return true;
 }
 
+/** Longest rejected token copied into the fallback line, so that line stays short. */
+constexpr std::size_t kReportedTokenBytes = 32;
+
+/** Destiny 2 only supports these languages; anything else falls back to English. */
+constexpr std::array<std::string_view, 13> kSupportedLanguages{
+    "english",
+    "french",
+    "german",
+    "italian",
+    "japanese",
+    "brazilian",
+    "spanish",
+    "russian",
+    "polish",
+    "schinese",
+    "tchinese",
+    "latam",
+    "koreana",
+};
+
+/** @param token Candidate Steam API language code. @return True when this build ships it. */
+[[nodiscard]] bool is_supported_language(std::string_view token) noexcept {
+    return std::find(kSupportedLanguages.begin(), kSupportedLanguages.end(), token)
+           != kSupportedLanguages.end();
+}
+
+/**
+ * Names a replaced language token. Settings are read before the log sinks exist, so this early
+ * line is the only report.
+ * @param encoded Borrowed encoded token that was not accepted.
+ */
+void report_language_fallback(std::string_view encoded) noexcept {
+    std::array<char, 96> line{};
+    // The token comes from the file, so its length is capped here rather than trusted.
+    const std::string_view token = encoded.substr(0, std::min(encoded.size(), kReportedTokenBytes));
+    const int written = std::snprintf(line.data(),
+                                      line.size(),
+                                      "ev=settings stage=language result=fallback token=%.*s",
+                                      static_cast<int>(token.size()),
+                                      token.data());
+    if (written > 0) {
+        log::early({line.data(), std::min(static_cast<std::size_t>(written), line.size() - 1)});
+    }
+}
+
+/**
+ * Resolves an authored Steam API language token, falling back to English for anything else.
+ * One token is the only accepted shape, because GetCurrentGameLanguage answers with this value.
+ * @param encoded Borrowed encoded JSON string bytes.
+ * @return The matching supported code, or the English fallback.
+ */
+[[nodiscard]] std::array<char, steam::kLanguageCapacity>
+resolve_language(std::string_view encoded) noexcept {
+    std::array<char, steam::kLanguageCapacity> decoded{};
+    if (decode_bounded_string(encoded, decoded)
+        && is_supported_language(std::string_view(decoded.data()))) {
+        return decoded;
+    }
+    report_language_fallback(encoded);
+    return {"english"};
+}
+
 } // namespace
 
 /** Parses Steam settings on top of the fixed defaults. */
@@ -132,6 +200,7 @@ bool Parser::steam_settings(steam::Settings& output) noexcept {
     }
     steam::Settings candidate = output;
     bool hasUser = false;
+    bool hasLanguage = false;
     if (consume('}')) {
         return true;
     }
@@ -145,6 +214,13 @@ bool Parser::steam_settings(steam::Settings& output) noexcept {
                 return false;
             }
             hasUser = true;
+        } else if (key == "language") {
+            std::string_view value;
+            if (hasLanguage || !string(value)) {
+                return false;
+            }
+            candidate.language = resolve_language(value);
+            hasLanguage = true;
         } else if (!skip_value(0)) {
             return false;
         }
@@ -175,7 +251,8 @@ bool Parser::steam_user_settings(steam::User& output) noexcept {
         }
         if (key == "persona_name") {
             std::string_view value;
-            if (hasPersonaName || !string(value) || !decode_persona(value, candidate.personaName)) {
+            if (hasPersonaName || !string(value)
+                || !decode_bounded_string(value, candidate.personaName)) {
                 return false;
             }
             hasPersonaName = true;

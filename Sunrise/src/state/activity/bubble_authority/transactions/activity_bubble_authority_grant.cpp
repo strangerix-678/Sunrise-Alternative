@@ -42,4 +42,18 @@ void record_grant(std::uint64_t sessionId, const Grant& grant) noexcept {
     ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
 }
 
+/** Drops every grant recorded for one session, so the next roster push grants again. */
+void clear_grants(std::uint64_t sessionId) noexcept {
+    if (sessionId == kAbsentSessionId) {
+        return;
+    }
+    AcquireSRWLockExclusive(&runtime::storage::g_stateLock);
+    ActivityState& state = runtime::storage::g_state.activity;
+    const std::size_t target = activity::transactions::find_session(state, sessionId);
+    if (target != kInvalidSessionSlot) {
+        state.sessions[target].bubbleAuthority = {};
+    }
+    ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
+}
+
 } // namespace sunrise::state::activity::bubble_authority

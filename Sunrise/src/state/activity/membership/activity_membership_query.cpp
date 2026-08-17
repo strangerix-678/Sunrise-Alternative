@@ -41,6 +41,20 @@ std::int32_t reported_region(std::uint64_t sessionId) noexcept {
     return region;
 }
 
+/** Reads the newest session the client has reported a region on. */
+std::uint64_t live_region_session(std::uint64_t fallback) noexcept {
+    std::uint64_t newest = kAbsentSessionId;
+    AcquireSRWLockShared(&runtime::storage::g_stateLock);
+    for (const SessionRecord& record : runtime::storage::g_state.activity.sessions) {
+        if (record.occupied && record.sessionId > newest
+            && record.membership.region.index > kAbsentRegionIndex) {
+            newest = record.sessionId;
+        }
+    }
+    ReleaseSRWLockShared(&runtime::storage::g_stateLock);
+    return newest == kAbsentSessionId ? fallback : newest;
+}
+
 /** Reads the identity value message 12 publishes at member record `+16`. */
 std::uint64_t join_identity(std::uint64_t sessionId) noexcept {
     if (sessionId == kAbsentSessionId) {

@@ -3,6 +3,7 @@
 #include "../../client/network/consumer.h"
 #include "../../core/logging/log.h"
 #include "../bap/runtime.h"
+#include "../gameplay/gameplay_runtime.h"
 #include "../http/server_http.h"
 #include "../transport/bap_listener.h"
 #include "../ui/runtime/server_ui_module_runtime.h"
@@ -21,9 +22,16 @@ bool initialize() noexcept {
                              core::log::Level::warn,
                              "ev=transport stage=listen result=fail");
         }
+        // The gameplay endpoint must bind before any descriptor advertises it.
+        if (!gameplay::initialize()) {
+            core::log::write(core::log::Channel::server,
+                             core::log::Level::warn,
+                             "ev=gameplay stage=init result=fail");
+        }
         if (ui::runtime::initialize()) {
             return true;
         }
+        gameplay::shutdown();
         transport::shutdown();
         client::network::unregister_bap_consumer(&bap::consume);
     }
@@ -35,11 +43,13 @@ bool initialize() noexcept {
 /** Runs one bounded server service slice. @param now Monotonic tick count. */
 void service(std::uint64_t now) noexcept {
     transport::service(now);
+    gameplay::service(now);
 }
 
 /** Unregisters Server consumers in reverse registration order. */
 void shutdown() noexcept {
     ui::runtime::shutdown();
+    gameplay::shutdown();
     transport::shutdown();
     client::network::unregister_bap_consumer(&bap::consume);
     client::network::unregister_http_consumer(&http::consume);

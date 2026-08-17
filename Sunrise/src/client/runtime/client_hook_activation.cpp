@@ -1,6 +1,7 @@
 #include <Windows.h>
 
 #include <array>
+#include <cstdint>
 #include <cstdio>
 #include <span>
 #include <string_view>
@@ -12,13 +13,15 @@
 #include "../content/investment/worker.h"
 #include "../executable/image.h"
 #include "../hooks/assert_handler/assert_handler_lifecycle.h"
-#include "../hooks/banner/banner_hook_lifecycle.h"
 #include "../hooks/bitmap/bitmap_hook_lifecycle.h"
 #include "../hooks/bootflow/bootflow_hook_lifecycle.h"
 #include "../hooks/config_getter/config_getter_lifecycle.h"
 #include "../hooks/cursor/runtime.h"
 #include "../hooks/graphics/graphics_hook_lifecycle.h"
+#include "../hooks/infinite_ammo/infinite_ammo.h"
 #include "../hooks/network/runtime.h"
+#include "../hooks/noclip/runtime.h"
+#include "../hooks/package_trust/package_trust_bypass.h"
 #include "../hooks/polled_input/runtime.h"
 #include "../hooks/queuez/queuez_hook_lifecycle.h"
 #include "../hooks/retail_log/retail_log_lifecycle.h"
@@ -125,9 +128,16 @@ void clear_game_targets() noexcept {
         report_resolve_failure();
         return false;
     }
+    // Steam initialization installs package trust before base-package registration. Keep this
+    // idempotent check beside the other main-image hooks so activation also verifies ownership.
+    if (!hooks::package_trust::install()) {
+        clear_game_targets();
+        return false;
+    }
     // The SignOn config blob carries this token. It must reach State before any hook owns the
     // resolved targets: extraction cannot recover from a missing bootstrap token.
     if (!content::bootstrap::publish_token()) {
+        (void)hooks::package_trust::uninstall();
         clear_game_targets();
         return false;
     }
@@ -136,6 +146,7 @@ void clear_game_targets() noexcept {
                          core::log::Level::error,
                          "ev=activate stage=game_network result=fail");
         if (!hooks::network::has_game_ownership()) {
+            (void)hooks::package_trust::uninstall();
             clear_game_targets();
         }
         return false;
@@ -158,13 +169,14 @@ void clear_game_targets() noexcept {
     // The teleport hooks attach whether or not the feature is on, so the interface can enable it
     // without a restart. Both replacements return immediately while nothing is requested.
     (void)hooks::teleport::install();
+    // Noclip owns its Havok-step target, so a patch-specific miss cannot disable teleport.
+    (void)hooks::noclip::install();
+    // Attaches whether or not the feature is on, so the interface can enable it without a restart.
+    (void)hooks::infinite_ammo::install();
     (void)hooks::queuez::install();
     // The bitmap reference guard puts the none sentinel in place of a reference outside tag
     // space. Without it the widget's stored-reference reader faults.
     (void)hooks::bitmap::install();
-    // The orbit banner component ships unbound, so its update body never runs and it draws the
-    // constructor's values.
-    (void)hooks::banner::install();
     content::investment::worker::activate();
     return true;
 }
@@ -183,10 +195,21 @@ bool activate_main_once() noexcept {
         ReleaseSRWLockExclusive(&runtime::g_lock);
         return active;
     }
+    // The image sweep dominates this call, so the pair of debug markers around it is what a
+    // boot-time measurement reads. Both are diagnostic and stay off at the usual levels.
+    core::log::write(
+        core::log::Channel::client, core::log::Level::debug, "ev=activate stage=main phase=begin");
     // The sweep stalls whichever thread calls it, so the overlay says what is happening. It
     // only reaches the screen once the presentation hooks are installed.
     core::ui::busy::begin(core::ui::busy::Task::initialization);
+    // Started after the overlay is up, because begin blocks for up to half a second waiting on
+    // presents. That wait belongs to the overlay, not to the work being measured.
+    const std::uint64_t startedTick = GetTickCount64();
     const bool active = runtime::activate_required_main_locked();
+    core::log::write_elapsed(core::log::Channel::client,
+                             "ev=activate stage=main phase=complete",
+                             startedTick,
+                             active ? "ok" : "fail");
     core::ui::busy::end(core::ui::busy::Task::initialization);
     if (!active) {
         // A failed sweep latches too: repeating it stalls the frame loop for nothing.

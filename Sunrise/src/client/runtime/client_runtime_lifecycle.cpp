@@ -1,20 +1,23 @@
 #include "../../core/logging/log.h"
 #include "../content/investment/worker.h"
 #include "../hooks/assert_handler/assert_handler_lifecycle.h"
-#include "../hooks/banner/banner_hook_lifecycle.h"
 #include "../hooks/bitmap/bitmap_hook_lifecycle.h"
 #include "../hooks/bootflow/bootflow_hook_lifecycle.h"
 #include "../hooks/config_getter/config_getter_lifecycle.h"
 #include "../hooks/cursor/runtime.h"
 #include "../hooks/graphics/graphics_hook_lifecycle.h"
+#include "../hooks/infinite_ammo/infinite_ammo.h"
 #include "../hooks/network/runtime.h"
+#include "../hooks/noclip/runtime.h"
+#include "../hooks/package_trust/package_trust_bypass.h"
 #include "../hooks/polled_input/runtime.h"
 #include "../hooks/queuez/queuez_hook_lifecycle.h"
 #include "../hooks/retail_log/retail_log_lifecycle.h"
 #include "../hooks/teleport/runtime.h"
+#include "../movement/movement_settings_store.h"
+#include "../player/player_settings_store.h"
 #include "../targets/game.h"
 #include "../targets/steam_targets.h"
-#include "../teleport/teleport_settings_store.h"
 #include "../ui/runtime/client_ui_module_runtime.h"
 #include "internal.h"
 #include "runtime.h"
@@ -23,8 +26,9 @@ namespace sunrise::client {
 
 /** Initializes Client-owned process state without installing hooks. */
 bool initialize(void* module) noexcept {
-    // Loaded before the pages register, so the teleport page draws saved values on its first frame.
-    teleport::initialize(module);
+    // Loaded before the pages register, so each page draws saved values on its first frame.
+    movement::initialize(module);
+    player::initialize(module);
     return ui::runtime::initialize();
 }
 
@@ -48,11 +52,17 @@ bool shutdown() noexcept {
         ReleaseSRWLockExclusive(&runtime::g_lock);
         return false;
     }
-    // Detached before the other game hooks because each fix is a plain one-site detour with
-    // no shared target state to hand back.
-    hooks::banner::uninstall();
+    if (!hooks::package_trust::uninstall()) {
+        core::log::write(core::log::Channel::client,
+                         core::log::Level::error,
+                         "ev=shutdown stage=package_trust result=fail");
+        ReleaseSRWLockExclusive(&runtime::g_lock);
+        return false;
+    }
     hooks::bitmap::uninstall();
     hooks::bootflow::uninstall();
+    hooks::infinite_ammo::uninstall();
+    hooks::noclip::uninstall();
     hooks::teleport::uninstall();
     hooks::queuez::uninstall();
     if (!hooks::config_getter::uninstall()) {
@@ -89,7 +99,8 @@ bool shutdown() noexcept {
     runtime::g_graphicsStage = runtime::StageState::pending;
     runtime::g_platformStage = runtime::StageState::pending;
     ui::runtime::shutdown();
-    teleport::shutdown();
+    player::shutdown();
+    movement::shutdown();
     core::log::write(core::log::Channel::client, core::log::Level::info, "ev=shutdown result=ok");
     ReleaseSRWLockExclusive(&runtime::g_lock);
     return true;

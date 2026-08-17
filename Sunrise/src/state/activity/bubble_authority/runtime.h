@@ -25,4 +25,12 @@ select_grant(std::uint64_t sessionId, std::int32_t sliceSetIndex, Grant& grant) 
  */
 void record_grant(std::uint64_t sessionId, const Grant& grant) noexcept;
 
+/**
+ * Drops every grant recorded for one session, so the next roster push grants again.
+ * A join resets the client's roster container. Keeping the old grant set would leave the new
+ * container ungranted.
+ * @param sessionId Joined activity session.
+ */
+void clear_grants(std::uint64_t sessionId) noexcept;
+
 } // namespace sunrise::state::activity::bubble_authority

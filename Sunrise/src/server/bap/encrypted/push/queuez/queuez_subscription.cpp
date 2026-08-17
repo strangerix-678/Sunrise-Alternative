@@ -1,6 +1,8 @@
 #include <array>
+#include <limits>
 
 #include "../../../../../core/logging/log.h"
+#include "../../../../../middleware/datagen/definitions.h"
 #include "../../../../../middleware/secure_channel/runtime.h"
 #include "../../../../../state/runtime/runtime.h"
 #include "../../queuez/queuez_state_validation.h"
@@ -79,6 +81,44 @@ namespace {
 
 } // namespace
 
+/** Appends one current full account snapshot at the peer's next Family-4 version. */
+bool append_account_resync_notification(Scratch& scratch,
+                                        const queuez::SessionState& before,
+                                        std::span<const std::byte, state::kAesKeySize> key,
+                                        std::array<std::byte, state::kBapNonceSize>& nonce,
+                                        std::span<std::byte> response,
+                                        std::size_t& written,
+                                        queuez::SessionState& after) noexcept {
+    after = before;
+    if (!queuez::valid(before) || !before.family4Active || before.family4RootSoid == 0
+        || before.family4Version == (std::numeric_limits<std::int32_t>::max)()) {
+        return false;
+    }
+    snapshot::Prepared prepared{};
+    if (!snapshot::prepare_family4_refresh(
+            scratch, before.family4RootSoid, before.family4Version + 1, prepared)
+        || !queuez::stage_family4_refresh(before, prepared.family, after)) {
+        return false;
+    }
+    const std::size_t objectCount = prepared.family.objects.size();
+    const std::size_t beforeBytes = written;
+    if (!queuez_frame::append(scratch,
+                              prepared.family,
+                              prepared.rawClearSize,
+                              prepared.compressedClearSize,
+                              key,
+                              nonce,
+                              response,
+                              written)) {
+        after = before;
+        return false;
+    }
+    middleware::secure_channel::advance_nonce(nonce);
+    queuez_report::push(
+        "peer_resync", queuez::kAccountFamilyType, objectCount, written - beforeBytes, 1);
+    return true;
+}
+
 /**
  * Stages the snapshots one subscription needs.
  * Every step reports and continues. The subscribe is answered whether or not a frame is built.
@@ -91,6 +131,7 @@ namespace {
  * @param written Existing byte count, updated after each complete push.
  * @param after Receives the queuez state published after caller output is copied.
  * @param armsRepush Receives whether the Family-4 companion owes its delayed second copy.
+ * @param armsBannerRepush Receives whether a family-zero body owes its delayed second copy.
  */
 void append_queuez_notification(Scratch& scratch,
                                 const queuez::SessionState& before,
@@ -100,9 +141,11 @@ void append_queuez_notification(Scratch& scratch,
                                 std::span<std::byte> response,
                                 std::size_t& written,
                                 queuez::SessionState& after,
-                                bool& armsRepush) noexcept {
+                                bool& armsRepush,
+                                bool& armsBannerRepush) noexcept {
     after = before;
     armsRepush = false;
+    armsBannerRepush = false;
     if (subscription.familyType == queuez::kAccountFamilyType && before.family4Active
         && before.family4Version != queuez::kInitialFamilyVersion) {
         // Our mirror of the Client's records is an observation, not an authority on what may be
@@ -117,7 +160,9 @@ void append_queuez_notification(Scratch& scratch,
         && !queuez::stage_family3_subscription(before, subscription, publish, stagedAfter)) {
         queuez_report::subscription_state("stage_family3");
         stagedAfter = before;
-        publish = true;
+        // A failed mirror check must never send a version-zero roster into an active incremental
+        // ladder. The correlated subscription response still goes out without a stale snapshot.
+        publish = false;
     }
 
     snapshot::Prepared prepared{};
@@ -125,22 +170,22 @@ void append_queuez_notification(Scratch& scratch,
         // Family zero's version and flags come from this peer's own ladder, so it is prepared
         // here instead of through the generic initial-snapshot path.
         const state::AccountState account = state::account_snapshot();
-        std::uint64_t selected = 0;
-        for (std::size_t index = 0; index < account.characterCount; ++index) {
-            if (account.characters[index].selected) {
-                selected = account.characters[index].soid;
-            }
-        }
-        // The pair names one character, so with none selected there is nothing to build yet and
-        // the first pick delivers it.
+        // The first character stands in before any pick. The record accepts a snapshot only in the
+        // short window the subscribe opens, so holding the answer for the pick spends that window
+        // and the subscription times out. The pick moves the pair afterwards.
+        const std::uint64_t selected = state::account::banner_character_soid(account);
         if (selected == 0) {
-            queuez_report::subscription_state("unselected");
+            stagedAfter.pendingBannerRoot = subscription.familyRootSoid;
+            queuez_report::subscription_state("nocharacter");
+            after = stagedAfter;
             return;
         }
+        stagedAfter.pendingBannerRoot = 0;
         if (!queuez::stage_family0_subscription(
                 before, selected, publish, incremental, stagedAfter)) {
             queuez_report::subscription_state("stage_family0");
             stagedAfter = before;
+            stagedAfter.pendingBannerRoot = 0;
             incremental = false;
         }
         // The unsolicited pair records its own delivery, so a later explicit subscribe finds the
@@ -164,11 +209,31 @@ void append_queuez_notification(Scratch& scratch,
         queuez_report::subscription_state("stage_family4");
         stagedAfter = before;
     }
+    // An empty full snapshot prunes the family to nothing. Wiping the roster closes the gate the
+    // family-zero source list is emitted from. Every other family needs the empty snapshot: it is
+    // what moves a record with no body to synced.
+    if (prepared.family.objects.empty() && subscription.familyType == queuez::kRosterFamilyType) {
+        queuez_frame::clear_object_storage(
+            scratch, prepared.rawClearSize, prepared.compressedClearSize);
+        queuez_report::subscription_state("empty");
+        after = stagedAfter;
+        return;
+    }
     if (!publish) {
         // Response-only suppression still builds the live snapshot, which names the root.
         queuez_frame::clear_object_storage(
             scratch, prepared.rawClearSize, prepared.compressedClearSize);
         after = stagedAfter;
+        return;
+    }
+    if (subscription.familyType == queuez::kRosterFamilyType
+        && (!stagedAfter.family3Active || stagedAfter.family3RootSoid != subscription.familyRootSoid
+            || stagedAfter.family3Version != queuez::kInitialFamilyVersion
+            || prepared.family.type != queuez::kRosterFamilyType
+            || prepared.family.rootSoid != stagedAfter.family3RootSoid
+            || prepared.family.version != stagedAfter.family3Version
+            || prepared.family.flags != middleware::queuez::kFullSnapshotFlag)) {
+        queuez_report::subscription_failure("family3_ladder");
         return;
     }
     const std::size_t objectCount = prepared.family.objects.size();
@@ -191,6 +256,10 @@ void append_queuez_notification(Scratch& scratch,
                         written - beforeBytes,
                         queuez_report::kNoRecordOutcome);
     after = stagedAfter;
+    // The client sends its subscribe just before it writes the record state, so this first copy
+    // arrives while the record still reads its previous state and is refused. Family zero has
+    // nothing else behind it, so the delayed copy is the one that lands.
+    armsBannerRepush = subscription.familyType == queuez::kBannerFamilyType;
 
     if (subscription.familyType == queuez::kRosterFamilyType && !stagedAfter.family4Active) {
         queuez::SessionState companionAfter{};
@@ -217,6 +286,7 @@ void append_queuez_notification(Scratch& scratch,
                                        written,
                                        bannerDelivered)) {
             after = bannerDelivered;
+            armsBannerRepush = true;
         }
     }
 }

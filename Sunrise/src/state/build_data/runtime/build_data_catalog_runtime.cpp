@@ -2,15 +2,19 @@
 
 #include "../../content/content_catalog.h"
 #include "../abilities/ability_bucket_catalog.h"
+#include "../collectibles/collectible_catalog.h"
 #include "../constants/investment_constant_catalog.h"
 #include "../hash_names/hash_name_catalog.h"
 #include "../inventory/buckets/inventory_bucket_catalog.h"
 #include "../items/details/item_detail_catalog.h"
+#include "../items/socket_plugs/socket_plug_catalog.h"
+#include "../material_requirements/material_requirement_catalog.h"
 #include "../progressions/progression_catalog.h"
 #include "../runtime.h"
 #include "../scenarios/scenario_catalog.h"
 #include "../socket_entry_lists/socket_entry_list_catalog.h"
 #include "../spawn_sets/spawn_set_catalog.h"
+#include "../vendors/vendor_catalog.h"
 #include "domain_markers.h"
 #include "persistence/publication_transaction.h"
 
@@ -173,14 +177,15 @@ bool spawn_sets_ready() noexcept {
 
 /** Publishes the spawn-set catalog extracted from the installed packages, in one step. */
 bool publish_spawn_sets(std::span<const spawn_sets::Stem> stems,
-                        std::span<const spawn_sets::NameHash> nameHashes) noexcept {
+                        std::span<const spawn_sets::NameHash> nameHashes,
+                        std::span<const spawn_sets::Point> points) noexcept {
     runtime::persistence::Transaction transaction;
     if (!transaction.active()) {
         return false;
     }
     // An empty catalog is complete. It is what a build with no installed spawn set means.
-    const bool replaced =
-        stems.empty() ? nameHashes.empty() : spawn_sets::replace(stems, nameHashes);
+    const bool replaced = stems.empty() ? nameHashes.empty() && points.empty()
+                                        : spawn_sets::replace(stems, nameHashes, points);
     if (!replaced) {
         return transaction.finish(false, rollback_spawn_catalog_publication);
     }
@@ -203,6 +208,16 @@ bool find_spawn_sets(std::string_view stem,
     spawn_sets::Stem row{};
     return spawn_sets_ready() && spawn_sets::find(stem, row)
            && spawn_sets::stem_hashes(row, output, count);
+}
+
+/** Finds the spawn point of one map-package stem nearest a world position. */
+bool find_nearest_spawn_point(std::string_view stem,
+                              const std::array<float, spawn_sets::kPositionComponents>& position,
+                              spawn_sets::Point& point,
+                              float& distance) noexcept {
+    point = {};
+    distance = 0.0F;
+    return spawn_sets_ready() && spawn_sets::nearest_point(stem, position, point, distance);
 }
 
 /** Finds one destination's bubble layout by package name. */
@@ -260,6 +275,35 @@ bool find_investment_constants(constants::InvestmentConstants& value) noexcept {
     return constants::find(value);
 }
 
+/** @return True when the installed vendor index is in State. */
+bool vendor_catalog_ready() noexcept {
+    return vendors::count() != 0;
+}
+
+/** Publishes the vendor index and every extracted vendor definition in one step. */
+bool publish_vendor_catalog(std::span<const vendors::IndexEntry> index,
+                            std::span<const vendors::Definition> definitions,
+                            std::span<const vendors::SaleRow> saleRows,
+                            std::span<const vendors::InstalledRow> installedRows) noexcept {
+    runtime::persistence::Transaction transaction;
+    return transaction.active()
+           && transaction.finish(vendors::replace(index, definitions, saleRows, installedRows),
+                                 vendors::clear);
+}
+
+/** Finds one vendor's index row. */
+bool find_vendor_index(std::uint32_t definitionHash, vendors::IndexEntry& entry) noexcept {
+    entry = {};
+    return vendor_catalog_ready() && vendors::find_hash(definitionHash, entry);
+}
+
+/** Finds one extracted vendor definition. */
+bool find_vendor_definition(std::uint32_t definitionHash,
+                            vendors::Definition& definition) noexcept {
+    definition = {};
+    return vendor_catalog_ready() && vendors::find(definitionHash, definition);
+}
+
 namespace runtime {
 
 /** Clears every generated catalog and the configured-domain publication state. */
@@ -267,8 +311,11 @@ void clear_catalogs() noexcept {
     content::clear();
     named::clear();
     items::clear();
+    collectibles::clear();
+    material_requirements::clear();
     items::details::clear();
     details::clear();
+    items::socket_plugs::clear();
     inventory::buckets::clear();
     socket_entry_lists::clear();
     rollback_ability_publication();
@@ -276,6 +323,7 @@ void clear_catalogs() noexcept {
     scenarios::clear();
     rollback_spawn_catalog_publication();
     rollback_name_catalog_publication();
+    vendors::clear();
     constants::clear();
 }
 

@@ -30,8 +30,9 @@ struct PendingMutation final {
     bool changesState{};
     /**
      * Set when the delta moves the player to a different region.
-     * The region is not a published membership field, so this is separate from changesState. A
-     * move must not advance the revision. It only makes the roster go out at once.
+     * The region is not a published membership field, so this is separate from changesState. The
+     * citizen advertisement is rebuilt from it, so a move advances the revision and sends the
+     * roster at once.
      */
     bool movesRegion{};
     /**
@@ -87,6 +88,15 @@ struct PendingMutation final {
 [[nodiscard]] bool acknowledged(std::uint64_t sessionId) noexcept;
 
 /**
+ * Advances the published membership revision so an already-applied snapshot can be corrected.
+ * The client applies one update per revision and drops every repeat. A body published with a
+ * stale citizen advertisement can only be replaced at a new revision.
+ * @param sessionId Joined activity session.
+ * @return True when the revision advanced.
+ */
+[[nodiscard]] bool republish(std::uint64_t sessionId) noexcept;
+
+/**
  * Reads the region the client last reported it was in.
  * The client names its own position and it changes as the player crosses a bubble boundary, so it
  * beats the destination's own arrival slice set wherever the host must say where the player is.
@@ -94,6 +104,15 @@ struct PendingMutation final {
  * @return The reported region index, or -1 when none has arrived.
  */
 [[nodiscard]] std::int32_t reported_region(std::uint64_t sessionId) noexcept;
+
+/**
+ * Reads the newest session the client has reported a region on.
+ * A link that joined a session it did not allocate never reports one. Session ids rise, so the
+ * newest is the live one.
+ * @param fallback Returned when no session has a reported region.
+ * @return That session id, or the fallback.
+ */
+[[nodiscard]] std::uint64_t live_region_session(std::uint64_t fallback) noexcept;
 
 /**
  * Reads the identity value message 12 publishes at member record `+16`.

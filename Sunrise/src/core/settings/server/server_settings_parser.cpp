@@ -17,6 +17,7 @@ bool Parser::server_settings(server::Settings& output) noexcept {
     }
     bool hasEntitlements = false;
     bool hasBapPort = false;
+    bool hasGameplay = false;
     for (;;) {
         std::string_view key;
         if (!string(key) || !consume(':')) {
@@ -35,6 +36,11 @@ bool Parser::server_settings(server::Settings& output) noexcept {
             }
             output.bapPort = static_cast<std::uint16_t>(value);
             hasBapPort = true;
+        } else if (key == "gameplay") {
+            if (hasGameplay || !gameplay_settings(output.gameplay)) {
+                return false;
+            }
+            hasGameplay = true;
         } else if (!skip_value(0)) {
             return false;
         }

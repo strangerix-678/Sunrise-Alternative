@@ -1,35 +1,75 @@
-# Sunrise-0.2.1-Teleport-Fly-Noclip Merge
+# Sunrise-Alt
 
-Teleport combined with fly/noclip in a single DLL, built on the Sunrise 0.2.1 base.
-This is a merge of the projects credited below, with a few additions of my own.
+An alternative take on Project Sunrise, built on the 0.3.2 base. Same offline exploration
+mod, with the movement page reworked and a few settings widened. This is a fork with my own
+tweaks on top — all the real work is by the authors credited below.
 
-## Teleport /Noclip
-
-Open the overlay with `Insert` and go to the **Teleport \& Flying** tab.
-Turn on **Enabled**, set the **Distance** slider (up to 200), then click **TP Key**
-and press the key you want. Press that key in-game to teleport.
-
-## Flying
-
-In the same tab, turn on the Flying **Enabled** switch, set **Fly Speed**, then click
-**Fly Key** and press the key you want (it won't work until a key is bound and Enabled is on).
-
-W,A,S,D: To move along the facing direction
-Spacebar: To ascend
-Ctrl: To descend
-Keys are saved between sessions.
-
-<img width="1809" height="1139" src="https://github.com/user-attachments/assets/2e05af38-e4e9-438f-bdd4-dbfe765474fb" />
+Offline only, same as the original — it does not connect to live servers.
 
 
-## Merge Credits
 
-All the real work is theirs, I did nothing but edit:
+## What's different in this version
 
-* stanuwu — Project Sunrise (base): https://github.com/stanuwu/Sunrise
-* T0PGLitch3r — Fly/Noclip mod: https://github.com/T0PGLitch3r/Sunrise-0.2.1-Fly-Noclip-Mod
+* Movement page renamed **Teleport \& Flying**, reorganised into clear sections:
+**Teleport → Noclip → Flying**.
+* **Teleport** distance raised to **200** units. The key row is labelled **TP Key**.
+* **Noclip** is its own section with a simple on/off toggle (no key needed) — it sits between
+Teleport and Flying so it's always visible.
+* **Flying** groups the fly controls with a clearer description. Fly speed range widened to
+**0.5 – 200 units/s** with finer (decimal) steps, so you can fly slower for precision or
+much faster than before.
+* HUD page is listed as **Sunrise HUD** in the menu (its in-panel title stays "HUD").
 
-Thank you both.
+
+
+## Usage
+
+Open the overlay with `Insert`, then go to the **Teleport \& Flying** tab.
+
+
+
+### Teleport
+
+Turn on **Enabled**, set the **Distance** slider (up to 200), then click **TP Key** and press
+the key you want. Press that key in-game to teleport.
+
+
+
+### Noclip
+
+Turn **Enabled** on or off. Pass through walls and floors — works while walking or flying.
+
+
+
+### Flying
+
+Turn on **Enabled**, set **Speed**, then click **Fly Key** and press the key you want. Then in-game:
+
+* `W / A / S / D` to move along the facing direction
+* `Spacebar` (jump) to go up
+* `Ctrl` (crouch) to go down
+
+All keys and settings are saved between sessions.
+
+
+
+## Preview
+
+
+
+
+
+## Credits
+
+All the real work is theirs, I just edited on top:
+
+* stanuwu — Project Sunrise (base, incl. fly/noclip in 0.3.2): https://github.com/stanuwu/Sunrise
+
+
+
+Thank you as always.
+
+
 
 # Sunrise
 
@@ -44,19 +84,24 @@ Destiny 2 Offline Exploration Mod
 * [Install Instructions](https://github.com/stanuwu/Sunrise/wiki/Installing)
 * [FAQ](https://github.com/stanuwu/Sunrise/wiki/FAQ)
 * [Common Issues](https://github.com/stanuwu/Sunrise/wiki/Common-Issues)
-* [Discord](https://discord.gg/22JS6et5k9)
+* [Discord](https://discord.gg/jQYqhkuh7h)
+
+## 
 
 ## Support the Original Author
 
-Leave a star on the original repos:
+Leave a star on the original repo: https://github.com/stanuwu/Sunrise
 
-* https://github.com/stanuwu/Sunrise
-
-If you want to support stanuwu's open source work, you can find the means on their
+If you want to support stanuwu's open source work you can find the means on their
 [profile](https://github.com/stanuwu). Also consider donating to charity instead.
 
 All content released under this project is free and open source. If someone is trying to sell you
 something you are getting scammed.
+
+## Rules
+
+Issues are for bug reports only. PRs are for pull requests only. Do not go and argue/chat there,
+you can do that on the discord.
 
 ## Contributing
 
@@ -126,7 +171,7 @@ has in detail, it saves me a lot of work.
 * [Ginsor](https://x.com/GinsorKR) - Gave me some useful pointers
 
 > These credits are from the original Sunrise project. Want to be added to or removed from the
-> credits? Let the original authors know.
+> credits? Let the original author know.
 
 ## Content Disclaimer
 
@@ -163,6 +208,7 @@ This project is not affiliated with Bungie or Sony in any way.
 ## License
 
 GPLv3, same as the original. See LICENSE. Original notices kept intact.
-Modified: merged fly/noclip onto 0.2.1, raised teleport max to 200, grouped the UI into
-Teleport \& Flying with assignable keys.
+Modified: reorganised the movement UI into Teleport \& Flying (Teleport / Noclip / Flying),
+raised teleport max to 200, widened fly speed to 0.5-200 units/s with finer steps, renamed the
+HUD menu entry to Sunrise HUD.
 

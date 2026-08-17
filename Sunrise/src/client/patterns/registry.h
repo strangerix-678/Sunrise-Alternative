@@ -37,7 +37,7 @@ struct ImageRange {
     std::span<std::byte> bytes;
 };
 
-/** Resolves every registered pattern during one image sweep. */
+/** Resolves every registered pattern against one executable range. */
 [[nodiscard]] bool resolve_all(std::span<std::byte> image,
                                std::span<const Pattern> patterns,
                                std::span<Match> matches) noexcept;

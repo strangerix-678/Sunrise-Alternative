@@ -17,8 +17,26 @@ namespace {
 
 /** The layout version member, quoted so a value string cannot match it. */
 constexpr std::string_view kVersionMember = "\"version\"";
-/** Members replaced with the bundled default because their value form changed. */
-constexpr std::array<std::string_view, 1> kReplacedMembers{"\"key_bindings\""};
+
+/** One replaced member, and the layout version that changed it. */
+struct ReplacedMember {
+    /** Quoted member name, so a value string cannot match it. */
+    std::string_view name;
+    /** Replaced only while the file is older than this version. */
+    std::uint32_t version;
+};
+
+/**
+ * Members replaced with the bundled default, each with the version that changed it.
+ * A member is listed because its value form changed, or because its default changed.
+ */
+constexpr std::array<ReplacedMember, 5> kReplacedMembers{{
+    {"\"key_bindings\"", 3},
+    {"\"region_private\"", 5},
+    {"\"topology\"", 5},
+    {"\"characters\"", 5},
+    {"\"profile_items\"", 6},
+}};
 /** One splice per replaced member, plus the version member itself. */
 constexpr std::size_t kSpliceCapacity = kReplacedMembers.size() + 1;
 /** Room for the version member and its digits when the file predates versioning. */
@@ -195,11 +213,16 @@ bool apply(std::string_view document,
             root + 1, root + 1, {versionText.data(), static_cast<std::size_t>(length)}};
     }
 
-    for (const std::string_view member : kReplacedMembers) {
+    const std::uint32_t from = document_version(document);
+    for (const ReplacedMember& member : kReplacedMembers) {
+        // A file at or past that version keeps its own value, so a user choice is never lost.
+        if (from >= member.version) {
+            continue;
+        }
         std::size_t replacementStart = 0;
         std::size_t replacementEnd = 0;
-        if (!value_span(document, member, start, end)
-            || !value_span(bundled, member, replacementStart, replacementEnd)) {
+        if (!value_span(document, member.name, start, end)
+            || !value_span(bundled, member.name, replacementStart, replacementEnd)) {
             // A member the file never carried needs no replacement.
             continue;
         }

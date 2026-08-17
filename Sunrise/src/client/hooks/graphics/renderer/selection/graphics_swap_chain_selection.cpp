@@ -119,6 +119,13 @@ bool acquire(IDXGISwapChain* swapChain, Resources& output) noexcept {
         release_resources(staged);
         return false;
     }
+    if (FAILED(staged.device->GetDeviceRemovedReason())) {
+        // A removed device never comes back, so every later step fails against it. The rebuild
+        // is refused here rather than at the render target.
+        report::note(report::Stage::acquire, report::Reason::deviceRemoved);
+        release_resources(staged);
+        return false;
+    }
     staged.device->GetImmediateContext(&staged.context);
     if (staged.context == nullptr) {
         report::note(report::Stage::acquire, report::Reason::context);

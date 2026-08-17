@@ -9,6 +9,10 @@ namespace sunrise::core::settings::steam {
 inline constexpr std::size_t kMaximumPersonaNameBytes = 63;
 /** Fixed persona storage includes one trailing null byte. */
 inline constexpr std::size_t kPersonaNameCapacity = kMaximumPersonaNameBytes + 1;
+/** Comfortably longer than any published Steam API language token (e.g. "vietnamese"). */
+inline constexpr std::size_t kMaximumLanguageBytes = 15;
+/** Fixed language storage includes one trailing null byte. */
+inline constexpr std::size_t kLanguageCapacity = kMaximumLanguageBytes + 1;
 
 /** Read-only settings for the single local Steam user. */
 struct User {
@@ -20,6 +24,8 @@ struct User {
 struct Settings {
     /** Options for the single local user exposed through Steam interfaces. */
     User user;
+    /** Steam API language token answered for GetCurrentGameLanguage/GetAvailableGameLanguages. */
+    std::array<char, kLanguageCapacity> language{"english"};
 };
 
 } // namespace sunrise::core::settings::steam

@@ -77,7 +77,7 @@ constexpr std::size_t kDisplacementSize = 4;
 
 } // namespace
 
-/** Derives the assert handler slot by voting sampled assert sites against every setter copy. */
+/** Derives the assert handler target by voting sampled assert sites against every setter copy. */
 bool derive(std::span<const patterns::ImageRange> image, Targets& output) noexcept {
     output = {};
     const patterns::Pattern setterPattern{"assert_set_handler",
@@ -93,6 +93,7 @@ bool derive(std::span<const patterns::ImageRange> image, Targets& output) noexce
     }
 
     const std::span<std::byte* const> sampled(sites.data(), siteCount);
+    Setter winnerSetter = nullptr;
     std::byte** winner = nullptr;
     std::size_t best = 0;
     std::size_t runnerUp = 0;
@@ -102,6 +103,7 @@ bool derive(std::span<const patterns::ImageRange> image, Targets& output) noexce
         if (votes > best) {
             runnerUp = best;
             best = votes;
+            winnerSetter = reinterpret_cast<Setter>(setters[index]);
             winner = candidate;
         } else if (votes > runnerUp) {
             runnerUp = votes;
@@ -114,6 +116,7 @@ bool derive(std::span<const patterns::ImageRange> image, Targets& output) noexce
     Targets resolved;
     resolved.slot = winner;
     resolved.original = *winner;
+    resolved.setter = winnerSetter;
     output = resolved;
     return true;
 }

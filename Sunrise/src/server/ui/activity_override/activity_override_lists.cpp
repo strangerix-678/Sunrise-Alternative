@@ -243,15 +243,17 @@ void refresh_activities(Lists& rows) noexcept {
     if (published == rows.activityRevision) {
         return;
     }
-    rows.activityRevision = published;
     rows.activities = {};
     rows.activityCount = 0;
     // The snapshot is a whole domain of fixed rows, so it is static rather than a local.
     static std::array<layouts::Definition, layouts::kDefinitionCapacity> scratch{};
     std::size_t count = 0;
     if (!state::build_data::snapshot_scenario_layouts(scratch, count)) {
+        // Leave the revision untaken so the next call rebuilds. Taking it here would leave the
+        // rows cleared for good.
         return;
     }
+    rows.activityRevision = published;
     const auto rowsRead = std::span(scratch).first(count);
     // Extraction order is package order, which no reader can search. Name order is.
     std::sort(rowsRead.begin(), rowsRead.end(), name_less);

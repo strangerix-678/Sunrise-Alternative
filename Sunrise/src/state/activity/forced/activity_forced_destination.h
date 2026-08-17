@@ -21,6 +21,9 @@ void snapshot(ForcedDestination& value) noexcept;
 /** Drops the selection and the switch, the same as the interface's clear action. */
 void clear() noexcept;
 
+/** @return True while the stored selection is complete and its switch is on. */
+[[nodiscard]] bool override_active() noexcept;
+
 /**
  * Overwrites one committed destination with the forced one. The descriptor bits are dropped:
  * they carry the client's chosen name, and one outbound message replays them as-is. The

@@ -35,10 +35,12 @@ void report_roster_push(Session& session,
     const int written =
         std::snprintf(line.data(),
                       line.size(),
-                      "ev=activity stage=roster result=%s dest=%.*s groups=%zu "
-                      "objects=%zu bytes=%zu state=%u keygroup=0x%X grant=%d "
+                      "ev=activity stage=roster result=%s soid=0x%llX foreign=%u dest=%.*s "
+                      "groups=%zu objects=%zu bytes=%zu state=%u keygroup=0x%X grant=%d "
                       "region=%u slice=%u spawn=0x%X join=0x%llX player=0x%llX",
                       kOutcomeNames[static_cast<std::size_t>(outcome)],
+                      static_cast<unsigned long long>(session.activitySessionId),
+                      session.activityJoinedForeignSession ? 1U : 0U,
                       static_cast<int>(destination.size()),
                       destination.data(),
                       roster.groupCount,

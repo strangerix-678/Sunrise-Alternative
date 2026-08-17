@@ -1,6 +1,8 @@
+#include <array>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <string_view>
 
 #include "../../../core/logging/log.h"
@@ -39,6 +41,8 @@ constexpr auto kFamily0SweepSignature =
 
 /** Signed displacement bytes of a near call, decoded to reach the source-list getter. */
 constexpr std::ptrdiff_t kRelativeOperandSize = 4;
+/** One line carries the two resolved addresses and nothing else. */
+constexpr std::size_t kTargetReportLimit = 96;
 
 using FamilySweep = std::int64_t(__fastcall*)(std::byte*);
 using Family0Sweep = void(__fastcall*)(std::byte*);
@@ -80,8 +84,21 @@ __declspec(noinline) std::int64_t __fastcall family_sweep(std::byte* manager) no
         return false;
     }
     std::byte* const operand = target + kFamily0SweepSignature.size();
-    family0::publish_source_list(reinterpret_cast<family0::SourceList>(
-        resolve_relative(operand, operand + kRelativeOperandSize)));
+    void* const getter = resolve_relative(operand, operand + kRelativeOperandSize);
+    family0::publish_source_list(reinterpret_cast<family0::SourceList>(getter));
+    // Two family-zero sweeps share this prologue shape, and only one subscribes and frees
+    // records. The resolved addresses say which one the scan picked.
+    std::array<char, kTargetReportLimit> line{};
+    const int count = std::snprintf(line.data(),
+                                    line.size(),
+                                    "ev=queuez stage=family0_target sweep=0x%llX getter=0x%llX",
+                                    reinterpret_cast<unsigned long long>(target),
+                                    reinterpret_cast<unsigned long long>(getter));
+    if (count > 0) {
+        core::log::write(core::log::Channel::client,
+                         core::log::Level::info,
+                         {line.data(), static_cast<std::size_t>(count)});
+    }
     const hooking::detour::Spec spec{target, reinterpret_cast<void*>(&family0_sweep)};
     return hooking::detour::install(spec, g_family0Handle);
 }

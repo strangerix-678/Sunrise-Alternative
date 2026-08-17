@@ -22,6 +22,7 @@ enum class Reason : unsigned {
     description,
     device,
     context,
+    deviceRemoved,
     // target
     backBuffer,
     view,

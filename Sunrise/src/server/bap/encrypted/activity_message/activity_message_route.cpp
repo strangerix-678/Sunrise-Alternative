@@ -6,6 +6,7 @@
 #include <cstdio>
 
 #include "../../../../core/logging/log.h"
+#include "../../../../core/settings/settings.h"
 #include "../../../../middleware/bap/activity_message/activity_client_identity_parser.h"
 #include "../../../../middleware/bap/activity_message/activity_client_keepalive_validator.h"
 #include "../../../../middleware/bap/activity_message/activity_high_water_validator.h"
@@ -157,12 +158,14 @@ void report_message(std::uint32_t messageType,
  */
 [[nodiscard]] bool prepare_join(const service::Request& request, ActivityPlan& plan) noexcept {
     service::JoinRequest parsed;
+    // The client takes the low slots and the server keeps the reserve above them.
+    const std::size_t reserve =
+        core::settings::server::gameplay::effective_reserve(core::settings::get().server.gameplay);
+    const std::size_t granted = state::activity::entity_slots::kSlotCount - reserve;
     if (!service::join_request::parse_join_request(request.payload, parsed)
         || parsed.sessionId != request.accountHandle
-        || !state::activity::entity_slots::prepare_join(parsed.sessionId,
-                                                        parsed.memberKey,
-                                                        state::activity::entity_slots::kSlotCount,
-                                                        plan.entitySlotMutation)) {
+        || !state::activity::entity_slots::prepare_join(
+            parsed.sessionId, parsed.memberKey, granted, reserve, plan.entitySlotMutation)) {
         return false;
     }
     plan.correlation = parsed.correlation;

@@ -35,6 +35,15 @@ namespace sunrise::state::activity {
 [[nodiscard]] bool commit(PendingAllocation& allocation) noexcept;
 
 /**
+ * Frees one committed activity-session record.
+ * Nothing else clears one. A host that allocates per region must release them, or the table
+ * fills and the oldest record is evicted.
+ * @param sessionId Public activity session id from an earlier allocation.
+ * @return True when a record held that id and is now free.
+ */
+bool release_session(std::uint64_t sessionId) noexcept;
+
+/**
  * Tests whether a nonzero activity session id is still in the fixed-size table.
  * @param sessionId Public activity session id from an earlier allocation.
  * @return True when the id is in a committed record.

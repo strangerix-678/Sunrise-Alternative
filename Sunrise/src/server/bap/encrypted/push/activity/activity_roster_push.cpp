@@ -52,8 +52,8 @@ bool append_roster_notification(Session& session,
         return false;
     }
 
-    // The grant is committed only after the body carrying it is staged, so a failed stage leaves
-    // the bubble ungranted and the next push retries it.
+    // The grant is picked here and committed only once the frame reaches the caller, so a
+    // discarded body leaves the bubble ungranted and the next push retries it.
     state::activity::bubble_authority::Grant grant{};
     // The grant follows the player, not the destination. The client names the region it is in
     // and that moves as it walks between bubbles, so granting the arrival bubble again would leave
@@ -67,7 +67,6 @@ bool append_roster_notification(Session& session,
         snapshot.grant.token = grant.token;
     }
 
-    bool recorded = false;
     const std::size_t initialWritten = written;
     auto initialNonce = nonce;
     std::size_t messageSize = 0;
@@ -82,18 +81,21 @@ bool append_roster_notification(Session& session,
                                                 written);
     if (encoded) {
         middleware::secure_channel::advance_nonce(nonce);
-        // The grant is recorded only after the body carrying it is staged, so a failed stage
-        // leaves the bubble ungranted and the next push retries it.
-        if (snapshot.hasGrant) {
-            state::activity::bubble_authority::record_grant(session.activitySessionId, grant);
-            recorded = true;
-        }
+        // Staged, not published. The grant and the counters are one-way and this body may still be
+        // discarded, so they are held here and settled by `commit_staged_roster` or
+        // `discard_staged_roster`.
+        session.activityRosterStaged = {grant,
+                                        initialRosterGroups,
+                                        initialRosterSends,
+                                        initialRosterState,
+                                        snapshot.hasGrant,
+                                        true};
     }
     report_roster_push(session,
                        snapshot,
                        name,
                        encoded ? messageSize : 0,
-                       recorded ? snapshot.grant.bubble : kNoGrant,
+                       encoded && snapshot.hasGrant ? snapshot.grant.bubble : kNoGrant,
                        encoded ? RosterOutcome::published : RosterOutcome::encodeFailed);
     SecureZeroMemory(scratch.responseBody.data(), messageSize);
     if (!encoded) {
@@ -108,6 +110,31 @@ bool append_roster_notification(Session& session,
     }
     SecureZeroMemory(&initialNonce, sizeof initialNonce);
     return encoded;
+}
+
+/** Settles a staged roster body that reached the caller. */
+void commit_staged_roster(Session& session) noexcept {
+    if (!session.activityRosterStaged.staged) {
+        return;
+    }
+    if (session.activityRosterStaged.hasGrant) {
+        state::activity::bubble_authority::record_grant(session.activitySessionId,
+                                                        session.activityRosterStaged.grant);
+    }
+    session.activityRosterStaged = {};
+}
+
+/** Puts back what a staged roster body advanced, now that the body has been discarded. */
+void discard_staged_roster(Session& session) noexcept {
+    if (!session.activityRosterStaged.staged) {
+        return;
+    }
+    // The client never saw this body, so its state byte must not be spent. The next push has to
+    // move the byte again or the client does not rebuild its roster objects.
+    session.activityRosterGroups = session.activityRosterStaged.priorGroups;
+    session.activityRosterSends = session.activityRosterStaged.priorSends;
+    session.activityRosterState = session.activityRosterStaged.priorState;
+    session.activityRosterStaged = {};
 }
 
 } // namespace sunrise::server::bap::encrypted::push::activity

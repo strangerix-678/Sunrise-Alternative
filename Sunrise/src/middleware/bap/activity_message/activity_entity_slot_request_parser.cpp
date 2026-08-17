@@ -19,8 +19,8 @@ bool parse_entity_slot_request(std::span<const std::byte> input, std::int32_t& v
         return false;
     }
 
-    const std::uint32_t raw =
-        encoding::read_u32_be(std::span<const std::byte, kEncodedSize>{input});
+    // A longer body is legal here, so take a prefix. A fixed-extent span needs an exact size.
+    const std::uint32_t raw = encoding::read_u32_be(input.first<kEncodedSize>());
     const std::int64_t decoded = static_cast<std::int64_t>(raw) - kSignedValueBias;
     value = static_cast<std::int32_t>(decoded);
     return true;

@@ -2,10 +2,13 @@
 
 #include <atomic>
 
+#include "../../client/graphics/wine_compat.h"
 #include "../../client/hooks/egress/runtime.h"
+#include "../../client/hooks/package_trust/package_trust_bypass.h"
 #include "../../client/runtime/runtime.h"
 #include "../../core/logging/log.h"
 #include "../../core/runtime/core_runtime.h"
+#include "../../core/runtime/host_environment.h"
 #include "callbacks/callback_registry.h"
 #include "context/steam_context_state.h"
 #include "internal.h"
@@ -46,6 +49,9 @@ bool g_platformActivationAttempted{};
 
 /** Starts the Steam shim and its exported state. */
 bool initialize(void* module) noexcept {
+    if (core::runtime::is_wine()) {
+        client::graphics::initialize_wine_display();
+    }
     if (!client::hooks::egress::install()) {
         return false;
     }
@@ -55,6 +61,16 @@ bool initialize(void* module) noexcept {
         return true;
     }
     if (!core::initialize(module)) {
+        ReleaseSRWLockExclusive(&g_lifecycleLock);
+        return false;
+    }
+    // Base generation (_0) packages register during bootload, before the first callback pump can
+    // run the ordinary main-image hook sweep. Package trust must therefore attach at Steam init.
+    if (!client::hooks::package_trust::install()) {
+        core::log::write(core::log::Channel::client,
+                         core::log::Level::error,
+                         "ev=steam_init stage=package_trust result=fail");
+        (void)core::shutdown();
         ReleaseSRWLockExclusive(&g_lifecycleLock);
         return false;
     }

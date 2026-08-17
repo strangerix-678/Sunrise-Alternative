@@ -4,29 +4,39 @@
 
 #include "../../../core/ui/modules/registry/ui_module_registry.h"
 #include "../../../core/ui/modules/ui_module_descriptor.h"
-#include "../teleport/teleport_panel.h"
+#include "../movement/movement_panel.h"
+#include "../player/player_panel.h"
 
 namespace sunrise::client::ui::runtime {
 namespace {
 
-/** Namespaced stable ID prevents Client modules from colliding with Server modules. */
-constexpr std::string_view kTeleportStableId = "client.teleport";
-/** Short menu label for the teleport page. */
-constexpr std::string_view kTeleportDisplayName = "Teleport & Flying";
+/** Namespaced stable IDs prevent Client modules from colliding with Server modules. */
+constexpr std::string_view kMovementStableId = "client.movement";
+constexpr std::string_view kPlayerStableId = "client.player";
+/** Short menu label for the shared teleport and noclip page. */
+constexpr std::string_view kMovementDisplayName = "Teleport & Flying";
+/** Short menu label for the player page. */
+constexpr std::string_view kPlayerDisplayName = "Player";
 
-core::ui::modules::registry::PageRegistration g_teleportPage;
+core::ui::modules::registry::PageRegistration g_movementPage;
+core::ui::modules::registry::PageRegistration g_playerPage;
 
 } // namespace
 
-/** @return True when the Client module owns its Core UI registry slot. */
+/** @return True when both Client modules own their Core UI registry slots. */
 bool initialize() noexcept {
-    return g_teleportPage.acquire(
-        core::ui::modules::Owner::client, kTeleportStableId, kTeleportDisplayName, &teleport::draw);
+    // Registered after movement, which is the order the menu lists them in.
+    const bool movementOwned = g_movementPage.acquire(
+        core::ui::modules::Owner::client, kMovementStableId, kMovementDisplayName, &movement::draw);
+    const bool playerOwned = g_playerPage.acquire(
+        core::ui::modules::Owner::client, kPlayerStableId, kPlayerDisplayName, &player::draw);
+    return movementOwned && playerOwned;
 }
 
-/** Removes the Client module from the Core UI registry. */
+/** Removes the Client modules from the Core UI registry. */
 void shutdown() noexcept {
-    g_teleportPage.release();
+    g_playerPage.release();
+    g_movementPage.release();
 }
 
 } // namespace sunrise::client::ui::runtime

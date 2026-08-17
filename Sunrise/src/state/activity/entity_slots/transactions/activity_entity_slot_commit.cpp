@@ -10,8 +10,8 @@ namespace sunrise::state::activity::entity_slots {
 namespace {
 
 /**
- * Applies one picked mask to its record. The caller already matched the member key
- * under the same lock.
+ * Applies one picked mask to its record. A join replaces the lease and the member key. A grant
+ * adds to the lease and a release subtracts.
  * @param record Session record, held under the root write lock.
  * @param prepared Plan whose kind and mask already passed the checks.
  * @return True when the picked bits obey the operation's ownership rule.
@@ -19,16 +19,16 @@ namespace {
 [[nodiscard]] bool apply(SessionRecord& record, const PendingMutation& prepared) noexcept {
     if (prepared.kind == MutationKind::join) {
         for (std::size_t index = 0; index < prepared.mask.size(); ++index) {
-            if ((record.heldEntitySlots[index] & prepared.mask[index]) != std::byte{}) {
+            if ((prepared.serverMask[index] & prepared.mask[index]) != std::byte{}) {
                 return false;
             }
         }
-        for (std::size_t index = 0; index < prepared.mask.size(); ++index) {
-            record.heldEntitySlots[index] |= prepared.mask[index];
-        }
-        if (!record.joined) {
-            record.memberKey = prepared.memberKey;
-        }
+        // A second region's activity client grants from a clear set, so it never waits for the
+        // first one's slots to come back.
+        record.heldEntitySlots = prepared.mask;
+        // Both ownership masks become visible under the one revision this commit takes.
+        record.serverEntitySlots = prepared.serverMask;
+        record.memberKey = prepared.memberKey;
         record.joined = true;
         return true;
     }
@@ -37,7 +37,11 @@ namespace {
     }
     if (prepared.kind == MutationKind::grant) {
         for (std::size_t index = 0; index < prepared.mask.size(); ++index) {
-            if ((record.heldEntitySlots[index] & prepared.mask[index]) != std::byte{}) {
+            const bool overlapsClient =
+                (record.heldEntitySlots[index] & prepared.mask[index]) != std::byte{};
+            const bool overlapsServer =
+                (record.serverEntitySlots[index] & prepared.mask[index]) != std::byte{};
+            if (overlapsClient || overlapsServer) {
                 return false;
             }
         }
@@ -77,7 +81,9 @@ bool commit(PendingMutation& mutation) noexcept {
         || (prepared.kind == MutationKind::join && prepared.memberKey != prepared.expectedMemberKey)
         || (prepared.kind != MutationKind::join
             && (prepared.memberKey != kClearedMemberKey
-                || prepared.expectedMemberKey != kClearedMemberKey))) {
+                || prepared.expectedMemberKey != kClearedMemberKey
+                || !transactions::empty(prepared.serverMask)
+                || prepared.serverReserveCount != 0))) {
         return false;
     }
 
@@ -94,22 +100,34 @@ bool commit(PendingMutation& mutation) noexcept {
 
     LeaseMask expected{};
     if (prepared.kind == MutationKind::join) {
-        if (prepared.requestedCount == 0 || prepared.requestedCount > kSlotCount) {
+        const bool reserveFits =
+            prepared.serverReserveCount < kSlotCount
+            && prepared.requestedCount <= kSlotCount - prepared.serverReserveCount;
+        if (prepared.requestedCount == 0 || !reserveFits) {
             ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
             return false;
         }
-        if ((record.joined && record.memberKey != prepared.memberKey)
-            || (!record.joined && record.memberKey != kClearedMemberKey)) {
+        // A record that has never joined must carry no key. A joined one may name any key,
+        // because each region's activity client brings its own.
+        if (!record.joined && record.memberKey != kClearedMemberKey) {
             ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
             return false;
         }
-        expected = transactions::select_free(record.heldEntitySlots, prepared.requestedCount);
+        const LeaseMask reserved = transactions::reserve_high(prepared.serverReserveCount);
+        if (!transactions::equal(prepared.serverMask, reserved)) {
+            ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
+            return false;
+        }
+        // The held set is left out, because the join clears it.
+        expected = transactions::select_free(reserved, prepared.requestedCount);
     } else if (prepared.kind == MutationKind::grant) {
         if (prepared.requestedCount == 0 || !record.joined) {
             ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
             return false;
         }
-        expected = transactions::select_free(record.heldEntitySlots, prepared.requestedCount);
+        expected = transactions::select_free(
+            transactions::unite(record.heldEntitySlots, record.serverEntitySlots),
+            prepared.requestedCount);
     } else if (prepared.kind == MutationKind::release) {
         if (!record.joined) {
             ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);

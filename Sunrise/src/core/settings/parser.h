@@ -56,6 +56,12 @@ private:
      */
     [[nodiscard]] bool server_settings(server::Settings& output) noexcept;
     /**
+     * Parses the gameplay endpoint block on top of the fixed defaults.
+     * @param output Receives the block only after the whole object is consistent.
+     * @return True when the topology, addresses, port, and slot reserve agree.
+     */
+    [[nodiscard]] bool gameplay_settings(server::gameplay::Settings& output) noexcept;
+    /**
      * Parses the authored entitlement array. Array order is the handle order the Client finds
      * definitions by, so entries are kept exactly as configured.
      * @param output Receives the whole authored table, replacing the bundled policy.
@@ -113,6 +119,7 @@ private:
     [[nodiscard]] bool flag_runs(std::span<std::uint8_t> bank) noexcept;
     [[nodiscard]] bool flag_indices(std::span<std::uint8_t> bank) noexcept;
     [[nodiscard]] bool objective_values(std::span<std::int32_t> bank) noexcept;
+    [[nodiscard]] bool progression_values(state::unlocks::ProgressionBank& bank) noexcept;
     /**
      * Parses the optional authored family-5 override group.
      * @param output Receives both override lists; id and gate fields stay default.
@@ -146,6 +153,8 @@ private:
      * @return True when every entry is complete and the array fits its size.
      */
     [[nodiscard]] bool profile_items(state::AccountState& output) noexcept;
+    /** Parses the server-authored, definition-driven ordinary-gear dismantle payout. */
+    [[nodiscard]] bool dismantle_rewards(state::AccountState& output) noexcept;
     /**
      * Parses one authored character identity.
      * @param output Receives one complete authored character row.
@@ -165,6 +174,15 @@ private:
      * @return True when every name is known and appears at most once.
      */
     [[nodiscard]] bool equipment(state::account::inventory::Equipment& output) noexcept;
+    /**
+     * Parses the optional unequipped character inventory array.
+     * @param output
+     * Receives items in authored bucket-placement order.
+     * @return True when every item is
+     * complete and the fixed array has room.
+     */
+    [[nodiscard]] bool
+    character_inventory(state::account::inventory::CharacterItems& output) noexcept;
     /**
      * Parses one item only when every required named field appears exactly once.
      * @param output Receives the complete item after checking.
@@ -241,6 +259,7 @@ private:
     /**
      * Turns one authored input name into its input code.
      * @param name Key name, or one modifier and the key it prefixes joined by "+".
+     * @param output Receives the input code.
      * @return True when every part of the name is in the Client's input table.
      */
     [[nodiscard]] static bool input_code_value(std::string_view name,
@@ -327,6 +346,7 @@ private:
     /**
      * Turns a JSON level token into the logging enum.
      * @param name Borrowed level token.
+     * @param output Receives the logging level.
      * @return True when the token names a supported level.
      */
     [[nodiscard]] static bool level_value(std::string_view name, log::Level& output) noexcept;
@@ -339,6 +359,7 @@ private:
     /**
      * Maps one readable setting name to a Windows SDK virtual key.
      * @param name Lowercase settings key name.
+     * @param output Receives the Windows SDK virtual key.
      * @return True when the name is in the supported menu-key set.
      */
     [[nodiscard]] static bool ui_toggle_key_value(std::string_view name, UINT& output) noexcept;

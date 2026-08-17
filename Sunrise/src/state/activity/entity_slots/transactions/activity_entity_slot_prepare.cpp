@@ -41,13 +41,15 @@ namespace {
 
 } // namespace
 
-/** Prepares a join. Picks only low-index slots the session does not already hold. */
+/** Prepares a join. It resets the lease, so it picks low-index slots outside the server reserve. */
 bool prepare_join(std::uint64_t sessionId,
                   std::uint64_t memberKey,
                   std::size_t grantCount,
+                  std::size_t serverReserveCount,
                   PendingMutation& mutation) noexcept {
     mutation = {};
-    if (sessionId == kAbsentSessionId || grantCount == 0 || grantCount > kSlotCount) {
+    if (sessionId == kAbsentSessionId || grantCount == 0 || grantCount > kSlotCount
+        || serverReserveCount >= kSlotCount || grantCount > kSlotCount - serverReserveCount) {
         return false;
     }
 
@@ -55,14 +57,16 @@ bool prepare_join(std::uint64_t sessionId,
     const ActivityState& state = runtime::storage::g_state.activity;
     PendingMutation prepared{};
     const SessionRecord* record = prepare_base(state, sessionId, false, prepared);
-    if (record != nullptr && (!record->joined || record->memberKey == memberKey)) {
-        prepared.mask = transactions::select_free(record->heldEntitySlots, grantCount);
+    if (record != nullptr) {
+        // A join takes the member key the request carries. Each region gets its own activity
+        // client with its own key, so keeping the previous held set would leave it ungranted.
+        prepared.serverMask = transactions::reserve_high(serverReserveCount);
+        prepared.mask = transactions::select_free(prepared.serverMask, grantCount);
         prepared.memberKey = memberKey;
         prepared.expectedMemberKey = memberKey;
         prepared.requestedCount = grantCount;
+        prepared.serverReserveCount = serverReserveCount;
         prepared.kind = MutationKind::join;
-    } else {
-        record = nullptr;
     }
     ReleaseSRWLockShared(&runtime::storage::g_stateLock);
     if (record == nullptr) {
@@ -86,7 +90,10 @@ bool prepare_grant(std::uint64_t sessionId,
     PendingMutation prepared{};
     const SessionRecord* record = prepare_base(state, sessionId, true, prepared);
     if (record != nullptr) {
-        prepared.mask = transactions::select_free(record->heldEntitySlots, requestedCount);
+        // A later grant may never reach into the server complement.
+        prepared.mask = transactions::select_free(
+            transactions::unite(record->heldEntitySlots, record->serverEntitySlots),
+            requestedCount);
         prepared.requestedCount = requestedCount;
         prepared.kind = MutationKind::grant;
     }

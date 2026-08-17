@@ -1,21 +1,26 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <span>
 #include <string_view>
 
 #include "abilities/definition.h"
+#include "collectibles/collectible_catalog.h"
 #include "constants/definition.h"
 #include "definition.h"
 #include "hash_names/definition.h"
 #include "inventory/buckets/definition.h"
 #include "items/details/definition.h"
 #include "items/item_catalog.h"
+#include "items/socket_plugs/definition.h"
+#include "material_requirements/material_requirement_catalog.h"
 #include "progressions/definition.h"
 #include "scenarios/definition.h"
 #include "socket_entry_lists/definition.h"
 #include "spawn_sets/definition.h"
+#include "vendors/definition.h"
 
 namespace sunrise::state::build_data {
 
@@ -79,6 +84,56 @@ publish_item_definitions(std::span<const items::Definition> definitions) noexcep
 [[nodiscard]] bool find_item_definition_hash(std::uint32_t definitionHash,
                                              items::Definition& definition) noexcept;
 
+/**
+ * Finds one installed item by the native dense definition index used by Collections requests.
+
+ * * @param definitionIndex Native item-definition row index.
+ * @param definition Receives the
+ * exact installed mapping.
+ * @return True when the complete table is ready and contains the
+ * requested row.
+ */
+[[nodiscard]] bool find_item_definition_index(std::uint16_t definitionIndex,
+                                              items::Definition& definition) noexcept;
+
+/** @return True when the whole dense collectible definition table is in State. */
+[[nodiscard]] bool collectible_definitions_ready() noexcept;
+
+/**
+ * Publishes the installed collectible ordinal-to-item table in one step.
+ * @param definitions Complete dense rows extracted from the investment root's collectible table.
+ * @return True when the rows pass the checks and any needed cache write succeeds.
+ */
+[[nodiscard]] bool
+publish_collectible_definitions(std::span<const collectibles::Definition> definitions) noexcept;
+
+/**
+ * Resolves the native 15-bit collectible index carried by a Collections acquire request.
+ * @param collectibleIndex Native collectible row ordinal.
+ * @param itemDefinitionIndex Receives the installed item-definition row, or the unavailable
+ * sentinel on failure.
+ * @return True when both the complete table and an item link exist for this collectible.
+ */
+[[nodiscard]] bool
+find_collectible_item_definition_index(std::uint16_t collectibleIndex,
+                                       std::uint16_t& itemDefinitionIndex) noexcept;
+
+/** Finds one complete installed collectible row, including its acquisition material set. */
+[[nodiscard]] bool find_collectible_definition(std::uint16_t collectibleIndex,
+                                               collectibles::Definition& definition) noexcept;
+
+/** @return True when every installed material-requirement set is available by native ordinal. */
+[[nodiscard]] bool material_requirement_sets_ready() noexcept;
+
+/** Publishes the complete dense native material-requirement table. */
+[[nodiscard]] bool publish_material_requirement_sets(
+    std::span<const material_requirements::Definition> definitions) noexcept;
+
+/** Resolves one authored material-requirement set without embedding any prices in code. */
+[[nodiscard]] bool
+find_material_requirement_set(std::uint16_t requirementSetIndex,
+                              material_requirements::Definition& definition) noexcept;
+
 /** @return True when a complete configured-detail domain, empty or not, is published. */
 [[nodiscard]] bool configured_item_details_ready() noexcept;
 
@@ -100,6 +155,47 @@ publish_configured_item_details(std::span<const items::details::Definition> defi
  */
 [[nodiscard]] bool find_configured_item_detail(std::uint16_t definitionIndex,
                                                items::details::Definition& definition) noexcept;
+
+/** @return True when the exact installed ordinary-socket plug relation is in State. */
+[[nodiscard]] bool socket_plug_rules_ready() noexcept;
+
+/**
+ * Publishes exact per-item, per-lane plug pools extracted from the installed packages.
+ * @param rules Strictly item/lane-ordered rules.
+ * @param pools Deduplicated contiguous pool ranges, beginning with the empty pool.
+ * @param members Flat sorted plug-definition indices.
+ * @return True when the relation and its item/detail links validate and any cache write succeeds.
+ */
+[[nodiscard]] bool
+publish_socket_plug_rules(std::span<const items::socket_plugs::Rule> rules,
+                          std::span<const items::socket_plugs::Pool> pools,
+                          std::span<const items::socket_plugs::Member> members) noexcept;
+
+/**
+ * Answers whether one installed plug definition is valid for one exact ordinary socket lane.
+ * Missing or malformed relations fail closed.
+ */
+[[nodiscard]] bool is_socket_plug_allowed(std::uint16_t itemDefinitionIndex,
+                                          std::uint8_t lane,
+                                          std::uint16_t plugDefinitionIndex) noexcept;
+
+/**
+ * Answers whether one profile definition needs an item-instance resident so the native socket
+ * action route can materialize it. Only stackable installed socket plugs in the supported mod and
+ * shader profile buckets qualify; currency/material/intrinsic rows do not.
+ */
+[[nodiscard]] bool is_profile_action_source(std::uint16_t itemDefinitionIndex,
+                                            std::uint8_t bucketId) noexcept;
+
+/**
+ * Answers whether applying one plug spends a stack the account has to hold.
+ * @param itemDefinitionIndex Installed plug-definition row.
+ * @param bucketId Installed profile bucket the plug belongs to.
+ * @return True only for a shader Collections can grant. An ornament stays owned once applied,
+ *         and a socket's default plug belongs to no stack at all.
+ */
+[[nodiscard]] bool is_consumed_on_apply(std::uint16_t itemDefinitionIndex,
+                                        std::uint8_t bucketId) noexcept;
 
 /** @return True when the whole progression definition table is in State. */
 [[nodiscard]] bool progression_definitions_ready() noexcept;
@@ -280,10 +376,26 @@ publish_scenario_layouts(std::span<const scenarios::Definition> definitions,
  * Publishes the spawn-set catalog extracted from the installed packages, in one step.
  * @param stems Complete stem rows in ascending name order, or an empty complete catalog.
  * @param nameHashes Complete flat bank in stem then hash order.
+ * @param points Complete point bank in extraction order, which may be empty.
  * @return True when the rows pass the checks and any needed cache write succeeds.
  */
 [[nodiscard]] bool publish_spawn_sets(std::span<const spawn_sets::Stem> stems,
-                                      std::span<const spawn_sets::NameHash> nameHashes) noexcept;
+                                      std::span<const spawn_sets::NameHash> nameHashes,
+                                      std::span<const spawn_sets::Point> points) noexcept;
+
+/**
+ * Finds the spawn point of one map-package stem nearest a world position.
+ * @param stem Normalized stem a destination row carries.
+ * @param position World position to measure from.
+ * @param point Receives the nearest point and the set it belongs to.
+ * @param distance Receives the distance to it, in world units.
+ * @return True when the catalog is ready, holds the stem, and the stem owns a point.
+ */
+[[nodiscard]] bool
+find_nearest_spawn_point(std::string_view stem,
+                         const std::array<float, spawn_sets::kPositionComponents>& position,
+                         spawn_sets::Point& point,
+                         float& distance) noexcept;
 
 /**
  * Copies the whole flat spawn-name hash bank.
@@ -313,6 +425,41 @@ publish_scenario_layouts(std::span<const scenarios::Definition> definitions,
  */
 [[nodiscard]] bool find_scenario_layout(std::string_view name,
                                         scenarios::Definition& definition) noexcept;
+
+/** @return True when the installed vendor index is in State. */
+[[nodiscard]] bool vendor_catalog_ready() noexcept;
+
+/**
+ * Publishes the vendor index and every extracted vendor definition in one step.
+ * @param index Complete index rows in ascending index order.
+ * @param definitions Extracted definitions in ascending index order, which may be empty.
+ * @param saleRows Complete flat sale bank in definition then row order.
+ * @param installedRows Complete flat installed bank in definition then row order.
+ * @return True when the rows pass the checks and any needed cache write succeeds.
+ */
+[[nodiscard]] bool
+publish_vendor_catalog(std::span<const vendors::IndexEntry> index,
+                       std::span<const vendors::Definition> definitions,
+                       std::span<const vendors::SaleRow> saleRows,
+                       std::span<const vendors::InstalledRow> installedRows) noexcept;
+
+/**
+ * Finds one vendor's index row, which carries the index the wire uses.
+ * @param definitionHash Vendor definition hash.
+ * @param entry Receives the matching row.
+ * @return True when the catalog is ready and exactly one row carries the hash.
+ */
+[[nodiscard]] bool find_vendor_index(std::uint32_t definitionHash,
+                                     vendors::IndexEntry& entry) noexcept;
+
+/**
+ * Finds one extracted vendor definition.
+ * @param definitionHash Vendor definition hash.
+ * @param definition Receives the matching definition.
+ * @return True when the catalog is ready and holds that definition.
+ */
+[[nodiscard]] bool find_vendor_definition(std::uint32_t definitionHash,
+                                          vendors::Definition& definition) noexcept;
 
 /** @return True only when every domain is ready and any needed cache write succeeds. */
 [[nodiscard]] bool persist() noexcept;

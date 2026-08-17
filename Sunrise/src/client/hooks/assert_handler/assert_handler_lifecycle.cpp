@@ -11,21 +11,16 @@ bool g_installed{};
 
 namespace {
 
-/**
- * Exchanges the handler slot under its own page protection.
- * @param slot Resolved handler slot.
- * @param expected Value the slot must currently hold.
- * @param value Replacement pointer.
- * @return True when the slot holds the replacement after the call.
- */
-[[nodiscard]] bool exchange(std::byte** slot, const void* expected, void* value) noexcept {
-    if (slot == nullptr || *slot != expected) {
+/** Calls the native setter after the expected-value ownership check. */
+[[nodiscard]] bool set_handler(const targets::game::assert_handler::Targets& targets,
+                               const void* expected,
+                               void* value) {
+    if (targets.setter == nullptr || targets.slot == nullptr
+        || static_cast<const void*>(*targets.slot) != expected) {
         return false;
     }
-    // The slot is a writable data global, so the write needs no protection change. The game's own
-    // setter stores it with a plain move. TODO: call that setter instead of writing the slot.
-    *slot = static_cast<std::byte*>(value);
-    return true;
+    targets.setter(value);
+    return static_cast<void*>(*targets.slot) == value;
 }
 
 } // namespace
@@ -45,7 +40,7 @@ bool install() noexcept {
         return true;
     }
     const targets::game::assert_handler::Targets& resolved = targets::game::assert_handler::get();
-    const bool installed = exchange(resolved.slot, resolved.original, handler_entry_point());
+    const bool installed = set_handler(resolved, resolved.original, handler_entry_point());
     g_installed = installed;
     ReleaseSRWLockExclusive(&g_lock);
     core::log::write(core::log::Channel::client,
@@ -63,9 +58,14 @@ bool uninstall() noexcept {
         return true;
     }
     const targets::game::assert_handler::Targets& resolved = targets::game::assert_handler::get();
-    const bool restored = exchange(resolved.slot, handler_entry_point(), resolved.original);
+    const bool restored = set_handler(resolved, handler_entry_point(), resolved.original);
     g_installed = !restored;
     ReleaseSRWLockExclusive(&g_lock);
+    if (!restored) {
+        core::log::write(core::log::Channel::client,
+                         core::log::Level::warn,
+                         "ev=assert stage=uninstall result=fail reason=slot");
+    }
     return restored;
 }
 

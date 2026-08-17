@@ -14,8 +14,12 @@
 
 namespace sunrise::state::activity {
 
-/** 4 records bound process-local session lookup with no heap storage. */
-inline constexpr std::size_t kSessionCapacity = 4;
+/**
+ * Records bound process-local session lookup with no heap storage. It must hold every live
+ * session at once: the private one plus one activity host per region. A full table evicts the
+ * oldest record, which can be the private one, so the margin is deliberate.
+ */
+inline constexpr std::size_t kSessionCapacity = 16;
 /** Zero is reserved as the absent activity-session id. */
 inline constexpr std::uint64_t kAbsentSessionId = 0;
 /** An unjoined record keeps its member-key storage cleared. */
@@ -41,6 +45,11 @@ struct SessionRecord {
     destination::DestinationSelection destination{};
     /** Slots granted to this session and not yet returned by its client. */
     entity_slots::LeaseMask heldEntitySlots{};
+    /**
+     * Slots reserved for server-authored entities. Always disjoint from the held mask, and
+     * never granted to a client. A released client slot returns to the free set, not here.
+     */
+    entity_slots::LeaseMask serverEntitySlots{};
     /** Membership data is valid only after this session binds its client key. */
     membership::MembershipState membership{};
     /** Bubble grant tokens reset with the bounded activity session record. */
